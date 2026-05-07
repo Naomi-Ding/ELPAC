@@ -1,0 +1,15 @@
+name: elpac-demo
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip
+  - numpy>=1.26
+  - scipy>=1.11
+  - scikit-learn>=1.3
+  - pip:
+      - jax==0.4.30
+      - jaxlib==0.4.30
+      - numpyro==0.15.3
+      - flax==0.8.5
+      - optax==0.2.3
