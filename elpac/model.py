@@ -52,27 +52,20 @@ class ModelConfig:
     """Shape + hyperparameter container for model.py.
 
  This is the same set of dimensions the simulator uses, plus a few
- hyperparameters that are frozen for model_spec consistency.
+ hyperparameters.
 
- Paper the paper alignment (Step 1 defaults,). The following defaults
- match the paper's the paper hyperparameter table :
+ Selected fields:
 
- - `w_anchor = 2.0` (was 5.0; the paper fixed value)
- - `eps_pinning = 0.01` (was inline 0.1; the paper epsilon_S)
- - `d_min = 1e-3` (was inline 1e-4; the paper d_min floor)
- - `Omega_0_soft_std = 1.0` (was inline 0.5; the paper Omega_0^soft)
- - `delta_shrink_shape_k1 = 2.0` (new; the paper a_1 for k=1)
- - `delta_shrink_shape = 1.5` (unchanged; the paper a_2 for k>=2)
- - `theta0_prior_std_override = None` -> use NC-sample std diag (the paper Omega^NC);
- set to float for scalar fallback.
- - `mu_c_prior_std_override = None` -> use anchor-sample std per subtype diag
- (the paper tilde_Omega_c); set to float for
- scalar fallback.
-
- To reproduce the prior version behavior, explicitly set:
- w_anchor=5.0, eps_pinning=0.1, d_min=1e-4, Omega_0_soft_std=0.5,
- delta_shrink_shape_k1=1.5, theta0_prior_std_override=0.5,
- mu_c_prior_std_override=0.5.
+ - `w_anchor`: likelihood weight on anchor subjects.
+ - `eps_pinning`: epsilon_S, std of the anchor / healthy-reference stage
+ priors on the logit scale.
+ - `d_min`: floor on the idiosyncratic noise variances D_c.
+ - `delta_shrink_shape_k1`, `delta_shrink_shape`: Gamma shapes a_1 (k=1)
+ and a_2 (k>=2) of the multiplicative-gamma shrinkage on loadings.
+ - `theta0_prior_std_override`: None -> NC-sample std diag (Omega^NC);
+ float -> scalar std (default 0.5).
+ - `mu_c_prior_std_override`: None -> anchor-sample std per subtype diag
+ (tilde_Omega_c); float -> scalar std (default 0.5).
  """
     n: int
     C: int
@@ -86,7 +79,7 @@ class ModelConfig:
     R_blood: int
     p_x: int
     p_w: int
-    w_anchor: float = 5.0 # 
+    w_anchor: float = 5.0
     gumbel_tau: float = 1.0 # Annealed externally per SVI step
     use_cognition: bool = False
     log_d_prior_mean: float = -1.0
@@ -102,37 +95,31 @@ class ModelConfig:
  # because psi = cumprod(Gamma(shape, 1)) drives a_flat's scale to 1/sqrt(NaN).
  # Validate at construction so the failure is loud.
  #
- # Paper the paper requires a SEPARATE shape for kappa_{c,1} (k=1, the first
- # multiplicative factor): a_1 = 2.0. Split via delta_shrink_shape_k1 so
- # the two can be toggled independently. Earlier behavior is recovered
- # by setting delta_shrink_shape_k1 = delta_shrink_shape = 1.5.
-    delta_shrink_shape_k1: float = 1.5 # (the prior version); but. See class docstring above.
-    eps_pinning: float = 0.1 # 
-    d_min: float = 1e-4 # 
-    Omega_0_soft_std: float = 0.5 # 
-    theta0_prior_std_override: Optional[float] = 0.5 # None=NC sample std regressed; 0.5 = the prior version scalar)
-    mu_c_prior_std_override: Optional[float] = 0.5 # None=anchor sample std regressed; 0.5 = the prior version scalar)
+ # `delta_shrink_shape_k1` is a separate shape a_1 for kappa_{c,1} (k=1),
+ # so it can be set independently of a_2.
+    delta_shrink_shape_k1: float = 1.5
+    eps_pinning: float = 0.1
+    d_min: float = 1e-4
+    Omega_0_soft_std: float = 0.5
+    theta0_prior_std_override: Optional[float] = 0.5 # None = NC sample std; float = scalar
+    mu_c_prior_std_override: Optional[float] = 0.5 # None = anchor sample std; float = scalar
     nc_subtype_idx: int = -1 # -1 = origin subjects identified by anchor_type==C (control_label path);
  # >=0 = that subtype index is treated as NC origin (S≈0, Theta_0 prior)
 
- # per the paper knob (). Paper the paper + the paper.
  # When True:
  # - sigma_c_stage prior switches from log-Normal (TransformedDistribution(
- # Normal(0, 1), Exp)) to Half-Cauchy(0, 1) per the paper.
+ # Normal(0, 1), Exp)) to Half-Cauchy(0, 1).
  # - The [0.5, 1.5] training-stability clamp on sigma_c_stage in the
- # structured-stage likelihood path is removed (the paper specifies the
+ # structured-stage likelihood path is removed (the
  # unclamped σ_c as the std of logit(S_i | c=c)).
  # Both fixes MUST toggle together — the clamp was a workaround for the
  # log-Normal tail, and the Half-Cauchy posterior is expected to land
  # inside [0.5, 1.5] organically (median 1.0).
- # Default True (flipped,). the paper rerun script passes
- # this explicitly; bare ModelConfig() callers in production inherit the
- # paper-compliant prior. Legacy test/misspec/calibration callers that need
- # the prior version behavior must pin use_paper_sigma_c=False explicitly (Bucket A).
+ # Default True. Callers that need the legacy behavior must pin
+ # use_paper_sigma_c=False explicitly.
     use_paper_sigma_c: bool = True
 
- # per the paper knob (). Paper the paper + the paper.
- # When True:
+ # When True (paper Eq. 15):
  # w_{c,k,:} ~ N(0, tau_k^2 (K_B + eps_B I)^{-1})
  # where K_B is the P×P second-difference penalty matrix (approximate
  # Gaussian-random-walk prior on the activation coefficients). Implements
@@ -140,12 +127,10 @@ class ModelConfig:
  # The sample-site name switches from `w_ckp_raw` (iid Normal) to
  # `w_ckp_raw_std` (iid standard Normal pre-Cholesky); `w_ckp` remains
  # the deterministic per-factor-normalized output consumed downstream.
- # Default True (flipped,). Same Bucket A pinning rule as
- # use_paper_sigma_c above.
+ # Default True. Same legacy pinning rule as use_paper_sigma_c above.
     use_paper_w_ckp_smoothness: bool = True
-    eps_B: float = 1e-3 # the paper ridge for K_B + eps_B I invertibility
+    eps_B: float = 1e-3 # ridge for K_B + eps_B I invertibility
 
- # per the paper knob (). Paper the paper + the paper.
  # When True, replaces the iid per-(c, r) onset prior
  # onset_times[c, r] ~ sigmoid(Normal(0, 1))
  # with modality-level onset centers and a soft cascade A < T < N ordering:
@@ -155,63 +140,51 @@ class ModelConfig:
  # t̃_{c,B} ~ N(μ_B, σ_m²) (blood UNconstrained)
  # onset_times[c, r] = sigmoid(t̃_{c, m(r)} + η_{c, r})
  # with η ~ N(0, cascade_eta_sigma²) the per-biomarker deviation. Blood
- # center is NOT constrained to be after N (per the paper).
+ # center is NOT constrained to be after N.
  # New sample sites: `t_ATN_raw` (C, 3), `t_tilde_B` (C,), `onset_eta`
  # (C, R). `onset_times` becomes a `numpyro.deterministic` site so
  # downstream consumers (extract_posterior_full / recovery metrics) still
  # see it under the same name.
- # Paper-compliance default (Commit C,): flipped True so any
- # bare ``ModelConfig()`` caller inherits the paper behavior. Stage 0a v2 and
- # runs are compute-unchanged (CLI flag --use-paper-cascade-prior
- # already pinned True). legacy callers that must reproduce
- # the prior version behavior should pass ``use_paper_cascade_prior=False``.
+ # Default True. Legacy callers should pass ``use_paper_cascade_prior=False``.
     use_paper_cascade_prior: bool = True
- # per the paper knob (). Paper the paper. Switches
- # cognition submodel χ_c(s):
+ # Cognition submodel χ_c(s):
  # "ispline" — monotone I-spline with non-negative coefficients (paper default).
  # "polynomial" — softplus-polynomial in [s, s², s³] (legacy).
  # Must be paired with the matching simulator setting.
     chi_c_basis: str = "ispline"
     chi_c_ispline_n_basis: int = 3 # Number of I-spline basis functions
     chi_c_ispline_degree: int = 2 # Polynomial degree of the underlying M-spline
- # the paper μ_A=0.3, μ_T=0.5,
- # μ_N=0.7, σ_m=0.15. Prior defaults 0.2/0.4/0.6 at σ=0.1 were pre-Phase-C
- # pre-audit values that shifted posteriors toward earlier onsets with
- # tighter spread than paper-spec.
-    cascade_mu_A: float = 0.3 # the paper modality-A onset center
-    cascade_mu_T: float = 0.5 # the paper modality-T onset center
-    cascade_mu_N: float = 0.7 # the paper modality-N onset center
+ # Onset-center priors: μ_A=0.3, μ_T=0.5, μ_N=0.7, σ_m=0.15.
+    cascade_mu_A: float = 0.3 # modality-A onset center
+    cascade_mu_T: float = 0.5 # modality-T onset center
+    cascade_mu_N: float = 0.7 # modality-N onset center
     cascade_mu_B: float = 0.35 # blood unconstrained; matches simulator's 0.35
-    cascade_sigma_m: float = 0.15 # the paper per-modality std σ_m around center
-    cascade_eta_sigma: float = 0.05 # the paper per-biomarker deviation η_{c,r} std
+    cascade_sigma_m: float = 0.15 # per-modality std σ_m around center
+    cascade_eta_sigma: float = 0.05 # per-biomarker deviation η_{c,r} std
 
- # per the paper knob (). Paper the paper Steps 7, 11, 13
- # + the paper. When True, replaces the iid `onset_times[c, r] ~ sigmoid(N(0, 1))`
+ # When True, replaces the iid `onset_times[c, r] ~ sigmoid(N(0, 1))`
  # and `beta_vel[c, r, q] ~ N(0, 2)` priors with modality-block multivariate
  # Normals (onset handled in pre-sigmoid η space, velocity in raw space):
  # η_{c, R_m} ~ N(t_tilde_{c,m} · 1, sigma_eta^2 · Σ^(m))
  # beta_{c, R_m, q} ~ N(0, sigma_beta^2 · Σ^(m))
- # Σ^(m) is an exponential (Matérn-½) kernel on the 1-D biomarker-index grid
- # with `spatial_length_scale` length scale (default 0.3). This is PAIRED
+ # Σ^(m) is the per-modality kernel from `build_per_modality_kernels`
+ # (RBF / Laplacian / CAR / Identity; length scale `spatial_length_scale`, default 0.3). This is PAIRED
  # with the simulator flag `use_spatial_sim` — enabling one without the
  # other will over-shrink an unstructured truth (or fail to capture
- # structured truth). Paper-compliance default (Commit C,):
- # flipped True. Stage 0a v2 / compute-unchanged (CLI
- # --use-paper-spatial-priors + --use-spatial-sim already pinned).
- # legacy callers must pass both False together to restore
- # the prior version iid priors.
+ # structured truth). Default True. Legacy callers must pass both
+ # False together to restore the iid priors.
     use_paper_spatial_priors: bool = True
     spatial_length_scale: float = 0.3 # Exponential kernel length scale
     spatial_nugget: float = 1e-3 # Ridge added to Σ^(m) for Cholesky
-    sigma_eta_spatial: float = 0.3 # Scale on onset-time MVN prior (the paper σ_η)
+    sigma_eta_spatial: float = 0.3 # Scale on onset-time MVN prior (σ_η)
     sigma_beta_spatial: float = 2.0 # Scale on velocity-coeff MVN prior
  # (matches the legacy iid Normal(0, 2.0)
  # on beta_vel so marginal variance is
  # preserved as length_scale → 0).
 
- # Step 5c (): external kernel path. When non-None, the model
+ # External kernel path. When non-None, the model
  # loads per-modality kernels [K_A, K_T, K_N, K_blood] from this NPZ file
- # and uses them in place of the paper's RBF / Laplacian / CAR / Identity
+ # and uses them in place of the built-in RBF / Laplacian / CAR / Identity
  # kernels. The NPZ must contain keys 'K_A', 'K_T', 'K_N', 'K_blood' with
  # square matrices of shapes (R_A, R_A), (R_T, R_T), (R_N, R_N),
  # (R_blood, R_blood). Only consumed when `use_paper_spatial_priors=True`.
@@ -248,7 +221,7 @@ class ModelConfig:
             raise ValueError(
                 f"nc_subtype_idx must be -1 or in [0, C-1]; got {self.nc_subtype_idx} with C={self.C}"
             )
- # FIX M3: semantic safeguard — Θ₀ empirical prior must come from a healthy
+ # Semantic safeguard — Θ₀ empirical prior must come from a healthy
  # startpoint cohort, not from a subtype's disease endpoint anchors. When
  # nc_subtype_idx>=0, the prior is routed through subtype c's anchor rows,
  # which are by construction disease endpoints (anchor_type==c at S≈0.95).
@@ -349,15 +322,10 @@ class ModelConfig:
     use_ard_on_A: bool = False
     ard_a_shape: float = 1.0
     ard_b_rate: float = 1.0
- # (): the paper
- # a_{c,k,k} ~ HalfNormal(ψ_{c,k}^{-1/2})
- # sampled DIRECTLY (no Normal+softplus). Default flipped to True on
- # after 
- # (A1–A6 + W1 + W2) preserves Δ(M2-M1) and NC gate semantics. Callers
- # that need an earlier-version the prior behavior (legacy tests, earlier
- # calibration JSONs, misspec sweeps whose posterior `keep_sites` list
- # hard-codes `a_diag_raw`) must pass `use_paper_halfnormal_diag=False`
- # explicitly.
+ # a_{c,k,k} ~ HalfNormal(ψ_{c,k}^{-1/2}) (paper Sec. 2.4)
+ # sampled DIRECTLY (no Normal+softplus). Callers that need the legacy
+ # behavior (posterior `keep_sites` lists that hard-code `a_diag_raw`)
+ # must pass `use_paper_halfnormal_diag=False` explicitly.
     use_paper_halfnormal_diag: bool = True
 
     @property
@@ -377,7 +345,7 @@ class ModelConfig:
 def _modality_sign_vector(cfg: ModelConfig) -> jnp.ndarray:
     """(+1 / -1) sign vector applied inside softplus for velocity transforms.
 
- Convention from the spec: A, T = +; N = -; first blood = - (Aβ42/40), rest = +.
+ Convention: A, T = +; N = -; first blood = - (Aβ42/40), rest = +.
  """
     signs = np.ones(cfg.R, dtype=np.float32)
     boundaries = [
@@ -529,7 +497,7 @@ def build_numpyro_model(cfg: ModelConfig, phase: str = "phase2"):
     B_shell = build_bspline_eval_matrix(n_basis=Q, n_eval=J + 1)
     tau_grid = jnp.linspace(0.0, 1.0, J + 1)
 
- # per the paper: precompute the I-spline design
+ # precompute the I-spline design
  # matrix on the same (J+1)-point grid as `psi_basis_cache`, used for the
  # cognition submodel chi_c(s) when cfg.chi_c_basis == "ispline".
  # Shape (J+1, chi_c_ispline_n_basis). Earlier (default "polynomial")
@@ -540,14 +508,14 @@ def build_numpyro_model(cfg: ModelConfig, phase: str = "phase2"):
         degree=cfg.chi_c_ispline_degree,
     ) # (J+1, n_basis)
 
- # per the paper (the paper + the paper): precompute the Cholesky
+ # Precompute the Cholesky
  # scale factor for the smoothness prior
  # w_{c,k,:} ~ N(0, tau_k^2 (K_B + eps_B I)^{-1})
  # by building K_B + eps_B I, inverting, and factoring. Sampled via
  # reparameterization: w = tau_k * L @ w_std with w_std ~ N(0, I_P) and
  # L L^T = (K_B + eps_B I)^{-1}. Earlier (flag False) keeps iid Normal.
     if getattr(cfg, "use_paper_w_ckp_smoothness", False):
- # Pass ridge=0.0 so the only ridge is the paper's eps_B (avoid double
+ # Pass ridge=0.0 so the only ridge is cfg.eps_B (avoid double
  # ridging the helper's default 1e-4).
         K_B = second_difference_penalty(P, ridge=0.0) # (P, P)
         W_prec = K_B + float(cfg.eps_B) * jnp.eye(P) # (P, P), SPD
@@ -556,14 +524,14 @@ def build_numpyro_model(cfg: ModelConfig, phase: str = "phase2"):
     else:
         W_cov_scale = None
 
- # per the paper (the paper Steps 7, 11, 13 + the paper): precompute
- # Cholesky factors L_eta^(m), L_beta^(m) for per-modality MVN priors:
+ # Precompute Cholesky factors L_eta^(m), L_beta^(m) for per-modality MVN priors:
  # eta_{c, R_m} ~ N(mean, sigma_eta^2 · Σ^(m))
  # beta_{c, R_m, q} ~ N(0, sigma_beta^2 · Σ^(m))
- # Σ^(m) is the exponential kernel built by `spatial_kernel.exp_kernel_matrix`.
+ # Σ^(m) is the per-modality kernel from `build_per_modality_kernels`
+ # (RBF / Laplacian / CAR / Identity).
  # Modalities with zero biomarkers get `None` slots; callers must skip.
     if getattr(cfg, "use_paper_spatial_priors", False):
- # Step 5c: if cfg.external_kernels_path is set, load the NPZ bundle
+ # If cfg.external_kernels_path is set, load the NPZ bundle
  # once at model-construction time (cached as a list of np.ndarray).
  # Keys: 'K_A', 'K_T', 'K_N', 'K_blood' — shapes validated inside
  # build_per_modality_kernels via the external_K assertion path.
@@ -634,10 +602,10 @@ def build_numpyro_model(cfg: ModelConfig, phase: str = "phase2"):
             gumbel_tau = jnp.float32(cfg.gumbel_tau)
         n = Y.shape[0]
 
- # ---------- Data-driven prior centers (the paper Steps 1-2) ----------
+ # ---------- Data-driven prior centers ----------
  # Theta_0 ~ N(mu^NC, Omega^NC), mu_c ~ N(bar_Y_c, tilde_Omega_c).
  # Empirical means and stds computed inline from the data (anchor_type
- # selects which rows are NC / anchor_c). Paper the paper specifies the
+ # selects which rows are NC / anchor_c). The
  # prior covariance as the NC / anchor SAMPLE VARIANCE (diagonal).
         _nc_code = int(cfg.nc_subtype_idx) if cfg.nc_subtype_idx >= 0 else C
         is_nc_mask = (anchor_type == _nc_code).astype(jnp.float32)[:, None]
@@ -679,11 +647,11 @@ def build_numpyro_model(cfg: ModelConfig, phase: str = "phase2"):
         bar_Y_c = jnp.stack(bar_Y_c_list, axis=0)
         anchor_std_c = jnp.stack(anchor_std_list, axis=0) # (C, R)
 
- # Paper the paper: Theta_0 ~ N(mu^NC, Omega^NC), mu_c ~ N(bar_Y_c, tilde_Omega_c).
+ # Theta_0 ~ N(mu^NC, Omega^NC), mu_c ~ N(bar_Y_c, tilde_Omega_c).
  # Omega^NC = NC sample variance (diagonal); tilde_Omega_c = per-subtype
  # anchor sample variance (diagonal). When an override is supplied (e.g.
  # `theta0_prior_std_override=0.5`), use a scalar std instead — this path
- # reproduces the prior version the prior behavior.
+ # reproduces the legacy behavior.
         if cfg.theta0_prior_std_override is not None:
             theta0_std = float(cfg.theta0_prior_std_override) * jnp.ones(R)
         else:
@@ -740,7 +708,7 @@ def build_numpyro_model(cfg: ModelConfig, phase: str = "phase2"):
             "f_c_age", dist.Normal(jnp.zeros(C), 1.0).to_event(1)
         )
         if cfg.use_paper_sigma_c:
- # per the paper: Half-Cauchy(0, 1) per subtype.
+ # Half-Cauchy(0, 1) per subtype.
  # Median ≈ 1.0, heavy tails. Expanded to a vector of length C.
             sigma_c_stage = numpyro.sample(
                 "sigma_c_stage",
@@ -780,17 +748,15 @@ def build_numpyro_model(cfg: ModelConfig, phase: str = "phase2"):
  # observed `onset_times` site becomes a deterministic pass-through
  # sigmoid(t̃_{c, m(r)} + η_{c, r}) so downstream consumers still see
  # it by the same name.
- # Default (flag off) preserves the the prior version iid sigmoid-Normal prior.
+ # Flag off: legacy iid sigmoid-Normal prior.
  #
- # per the paper (the paper Steps 7, 11): when
- # `use_paper_spatial_priors` is True, the per-biomarker η draw is a
- # per-modality MVN with Σ^(m) covariance (exponential kernel on the
+ # When `use_paper_spatial_priors` is True, the per-biomarker η draw is a
+ # per-modality MVN with Σ^(m) covariance (per-modality kernel on the
  # 1-D biomarker-index grid). Applies in both cascade-on and cascade-off
  # paths below — in the cascade path the MVN replaces the iid η_{c,r};
  # in the non-cascade path the MVN replaces the sigmoid(Normal(0, 1))
  # direct draw and we use the legacy modality centers as the MVN mean.
         if getattr(cfg, "use_paper_cascade_prior", False):
- # B3 fix (): the paper (line 824-826) specifies
  # SOFT ordering: each modality center is sampled INDEPENDENTLY from a
  # Gaussian centered at its prior mean, with μ_A < μ_T < μ_N encouraging
  # but NOT enforcing A→T→N ordering. The previous cumulative-softplus
@@ -806,7 +772,7 @@ def build_numpyro_model(cfg: ModelConfig, phase: str = "phase2"):
  # matches the paper exactly.
  #
  # Legacy strict form (use_paper_cascade_prior=False): no cascade at all
- # (the prior version iid sigmoid-Normal prior). The cumulative-softplus form
+ # (legacy iid sigmoid-Normal prior). The cumulative-softplus form
  # is removed — it was never the legacy; it was a misimplementation of
  # the paper's soft form under the True branch.
             raw_ATN = numpyro.sample(
@@ -814,7 +780,7 @@ def build_numpyro_model(cfg: ModelConfig, phase: str = "phase2"):
                 dist.Normal(
                     jnp.broadcast_to(
                         jnp.array([
-                            cfg.cascade_mu_A, # μ_A = 0.3 
+                            cfg.cascade_mu_A, # μ_A = 0.3
                             cfg.cascade_mu_T, # μ_T = 0.5
                             cfg.cascade_mu_N, # μ_N = 0.7
                         ]),
@@ -841,7 +807,7 @@ def build_numpyro_model(cfg: ModelConfig, phase: str = "phase2"):
 
  # Per-biomarker deviation.
             if getattr(cfg, "use_paper_spatial_priors", False):
- # the paper: per-modality MVN for eta_{c, R_m}, with zero mean
+ # Per-modality MVN for eta_{c, R_m}, with zero mean
  # (modality centers are carried by t_tilde above). Each
  # modality block is sampled as its own sample site so the
  # overall `onset_eta` vector has the correct modality-block
@@ -863,12 +829,12 @@ def build_numpyro_model(cfg: ModelConfig, phase: str = "phase2"):
  # N(0, σ_η^2 Σ^(m)) via the Cholesky L_m of that covariance.
                     eta_m = jnp.einsum("cr,sr->cs", eps_m, Lm)
  # Scale factor: rescale so the marginal std of each entry
- # is cfg.cascade_eta_sigma (the the paper per-biomarker
+ # is cfg.cascade_eta_sigma (the per-biomarker
  # variability); the spatial Cholesky factor's marginal is
  # cfg.sigma_eta_spatial by construction. Dividing restores
- # the the paper variance and leaves the correlation structure
- # intact, so Step 5 is a correlation-only modification of
- # the Step 4 eta draw.
+ # that variance and leaves the correlation structure
+ # intact, so the spatial prior is a correlation-only
+ # modification of the iid eta draw.
                     eta_m = eta_m * (cfg.cascade_eta_sigma / jnp.maximum(
                         float(cfg.sigma_eta_spatial), 1e-6))
                     eta_blocks.append((lo, hi, eta_m))
@@ -891,9 +857,9 @@ def build_numpyro_model(cfg: ModelConfig, phase: str = "phase2"):
             )
         else:
             if getattr(cfg, "use_paper_spatial_priors", False):
- # the paper without cascade: sample η_{c, R_m} ~ N(mu_m · 1,
+ # Without cascade: sample η_{c, R_m} ~ N(mu_m · 1,
  # sigma_eta^2 Σ^(m)) per modality, then onset_times =
- # sigmoid(η). Use the paper modality centers as mu_m
+ # sigmoid(η). Use the modality centers as mu_m
  # (same values as the cascade defaults — these are the paper's
  # soft A<T<N onset centers, plus a blood center at 0.35).
                 mu_m_vec = jnp.array([
@@ -946,7 +912,7 @@ def build_numpyro_model(cfg: ModelConfig, phase: str = "phase2"):
  # At prior std 0.5, softplus(beta_vel @ B) saturates around small values;
  # at 2.0 the posterior can reach velocity norms comparable to truth.
         if getattr(cfg, "use_paper_spatial_priors", False):
- # the paper beta_{c, R_m, q} ~ N(0, sigma_beta^2 Σ^(m))
+ # beta_{c, R_m, q} ~ N(0, sigma_beta^2 Σ^(m))
  # per modality per (c, q). Sample standard-Normal residuals, rotate
  # by the modality Cholesky, and assemble (C, R, Q).
             beta_blocks = []
@@ -1007,8 +973,7 @@ def build_numpyro_model(cfg: ModelConfig, phase: str = "phase2"):
                         a_prior_std[:, None, :], # (C, 1, K) broadcast
                     ).to_event(3),
                 )
- # (): the paper — direct
- # HalfNormal on diagonal so shrinkage actually drives diag → 0.
+ # Direct HalfNormal on diagonal so shrinkage actually drives diag → 0.
                 if getattr(cfg, "use_paper_halfnormal_diag", False):
                     a_diag_pos = numpyro.sample(
                         "a_diag_pos",
@@ -1023,12 +988,10 @@ def build_numpyro_model(cfg: ModelConfig, phase: str = "phase2"):
                     a_diag_pos = None
             else:
  # Multiplicative gamma shrinkage (Bhattacharya & Dunson 2011).
- # Paper the paper specifies split shapes:
- # kappa_{c,1} ~ Gamma(a_1=2.0, 1) # first column
- # kappa_{c,k>=2} ~ Gamma(a_2=1.5, 1) # later columns
- # The per-column shape vector is assembled here; the prior version
- # behavior (uniform 1.5) is recovered by setting
- # `delta_shrink_shape_k1 = delta_shrink_shape = 1.5`.
+ # Split shapes:
+ # kappa_{c,1} ~ Gamma(delta_shrink_shape_k1, 1) # first column
+ # kappa_{c,k>=2} ~ Gamma(delta_shrink_shape, 1) # later columns
+ # Both default to 1.5; set delta_shrink_shape_k1=2.0 for a_1=2.0.
                 shape_vec = jnp.concatenate([
                     jnp.full((1,), cfg.delta_shrink_shape_k1),
                     jnp.full((max(K - 1, 0),), cfg.delta_shrink_shape),
@@ -1053,7 +1016,7 @@ def build_numpyro_model(cfg: ModelConfig, phase: str = "phase2"):
                         a_prior_std[:, None, :], # (C, 1, K) broadcast
                     ).to_event(3),
                 )
- # (): the paper — direct HalfNormal.
+ # Direct HalfNormal on diagonal.
                 if getattr(cfg, "use_paper_halfnormal_diag", False):
                     a_diag_pos = numpyro.sample(
                         "a_diag_pos",
@@ -1081,7 +1044,7 @@ def build_numpyro_model(cfg: ModelConfig, phase: str = "phase2"):
  # deterministic transformation inside the model. The KL is still well-
  # defined because the projection is linear and the prior has zero mean.
             if cfg.use_paper_w_ckp_smoothness:
- # Paper the paper: w_{c,k,:} ~ N(0, tau_k^2 (K_B + eps_B I)^{-1}).
+ # Paper Eq. 15: w_{c,k,:} ~ N(0, tau_k^2 (K_B + eps_B I)^{-1}).
  # Reparameterize: sample w_std ~ N(0, I_P) then scale by tau_k * L,
  # where L = chol((K_B + eps_B I)^{-1}) was precomputed above.
  # Site name renamed to `w_ckp_raw_std` so downstream consumers
@@ -1109,11 +1072,11 @@ def build_numpyro_model(cfg: ModelConfig, phase: str = "phase2"):
                         tau_k[None, :, None] * jnp.ones((C, K, P)),
                     ).to_event(3),
                 )
- # Per-factor normalization (S4)
+ # Per-factor normalization (1^T w_{c,k} = 0)
             w_ckp = w_ckp_raw - jnp.mean(w_ckp_raw, axis=-1, keepdims=True)
             numpyro.deterministic("w_ckp", w_ckp)
 
- # Build A_c per subtype. (): when
+ # Build A_c per subtype. When
  # use_paper_halfnormal_diag=True, the diagonal was sampled directly
  # from HalfNormal (already positive) — use the _direct helper that
  # skips the softplus transform.
@@ -1157,7 +1120,7 @@ def build_numpyro_model(cfg: ModelConfig, phase: str = "phase2"):
                 cfg.log_d_prior_std,
             ).to_event(2),
         )
-        D_c = jnp.exp(log_D) + cfg.d_min # positivity floor (the paper d_min)
+        D_c = jnp.exp(log_D) + cfg.d_min # positivity floor d_min
 
  # ---------- Trajectory construction ----------
         V = _velocity_from_shell_boundaries(
@@ -1188,17 +1151,16 @@ def build_numpyro_model(cfg: ModelConfig, phase: str = "phase2"):
  # Chi_c: positive coefficients so +chi_c(s) is monotone increasing
  # (later stage -> higher CDR-SB score = worse cognition).
  #
- # Two bases 
+ # Two bases:
  # "polynomial" (default): softplus-positive polynomial in
  # [s, s^2, s^3]. Monotone for nonneg coefficients but only
  # cubic-expressive.
  # "ispline": monotone I-spline with nonneg coefficients.
  # chi_c(0) = 0 by construction; strict monotone non-decreasing.
- # Matches the paper spec.
  # Sample site name stays "chi_c_raw" in both paths so the amortized
  # guide / posterior-extraction sites see the same name; the SHAPE
  # differs (C, 3) polynomial vs (C, n_basis) I-spline.
- # B4 verification (): traced end-to-end for cfg.chi_c_basis=="ispline":
+ # Traced end-to-end for cfg.chi_c_basis=="ispline":
  # 1. build_ispline_eval_matrix → chi_basis_cache (J+1, n_basis) precomputed above.
  # 2. chi_c_raw sampled (C, n_basis) from N(0,1); chi_c = softplus(chi_c_raw) >= 0.
  # 3. chi_basis_at(s) interpolates chi_basis_cache at subject's stage → (n_basis,).
@@ -1224,7 +1186,7 @@ def build_numpyro_model(cfg: ModelConfig, phase: str = "phase2"):
  # numpyro enumeration machinery (which is finicky with vmap-over-plate).
         logit_anchor_mean = jnp.log(0.95 / 0.05)
         logit_nc_mean = jnp.log(0.01 / 0.99)
-        eps_pinning = cfg.eps_pinning # the paper epsilon_S (default 0.01)
+        eps_pinning = cfg.eps_pinning # epsilon_S (default 0.1)
 
         is_anchor = (anchor_type >= 0) & (anchor_type < C)
         is_nc = anchor_type == C
@@ -1232,7 +1194,7 @@ def build_numpyro_model(cfg: ModelConfig, phase: str = "phase2"):
 
  # Per-subject logit-stage prior. Two modes:
  # structured_stage=False: one logit_S per subject, subtype-agnostic.
- # Backward-compatible with the existing S3/S4 runs.
+ # Backward-compatible legacy mode.
  # structured_stage=True : one logit_S per (subject, subtype), shape (n, C).
  # Structured VI with subtype-conditional stage posterior.
         if cfg.structured_stage:
@@ -1266,7 +1228,7 @@ def build_numpyro_model(cfg: ModelConfig, phase: str = "phase2"):
  # already positive (log-Normal default; Half-Cauchy when
  # cfg.use_paper_sigma_c=True).
             if cfg.use_paper_sigma_c:
- # per the paper: no clamp; σ_c flows directly.
+ # no clamp; σ_c flows directly.
                 sigma_c_positive = sigma_c_stage[None, :] # (1, C)
             else:
  # Earlier training-stability clamp to [0.5, 1.5]. Paper
@@ -1395,7 +1357,7 @@ def build_numpyro_model(cfg: ModelConfig, phase: str = "phase2"):
         if ipw_weights is not None:
             w_tilde = ipw_weights
         else:
- # FIX L5 design note: NC subjects (anchor_type == C) receive w_tilde=1.0
+ # Design note: NC subjects (anchor_type == C) receive w_tilde=1.0
  # (general-pool weight) rather than w_anchor. Rationale: NC is already
  # tightly constrained by the stage-prior pinning at logit(0.01) with
  # eps_pinning std; upweighting the imaging term with w_anchor would
@@ -1447,7 +1409,7 @@ def build_numpyro_model(cfg: ModelConfig, phase: str = "phase2"):
  # chi_c has shape (C, n_chi_basis); compute (C, n) cognition effect.
  # +chi gives later stage -> higher C_i (CDR-SB convention: higher = worse).
             if cfg.chi_c_basis == "ispline":
- # the paper evaluate I-spline basis at each
+ # Evaluate I-spline basis at each
  # subject's stage via linear interpolation over the precomputed
  # (J+1, n_basis) design grid (same pattern as psi_at_stage above).
  # Monotone non-decreasing since chi_c = softplus(chi_c_raw) >= 0.
@@ -1470,7 +1432,7 @@ def build_numpyro_model(cfg: ModelConfig, phase: str = "phase2"):
                     s_basis = jax.vmap(chi_basis_at)(S_i) # (n, n_basis)
                     chi_s_cn = jnp.einsum("ck,nk->cn", chi_c, s_basis)
             else:
- # Polynomial branch (default; the prior version).
+ # Polynomial branch (legacy).
                 if S_i_c is not None:
  # structured_stage: per-(c, i) stage basis
                     s_basis_cn = jnp.stack([S_i_c.T, S_i_c.T**2, S_i_c.T**3], axis=-1) # (C, n, 3)

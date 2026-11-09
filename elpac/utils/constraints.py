@@ -1,16 +1,16 @@
-"""Parameter constraints and projections for the inv_trajectory v2 model.
+"""Parameter constraints and projections for the ELPAC model (paper Sec. 2.4, Eq. 15).
 
 Two critical constraints:
 
- 1. Lower-triangular A_c with positive diagonal (S1):
+ 1. Lower-triangular A_c with positive diagonal:
  make_lower_triangular_A(a_lower, a_diag, R, K) -> (R, K)
 
- 2. Per-factor normalization of activation coefficients (S4):
+ 2. Per-factor normalization of activation coefficients:
  project_per_factor_normalization(w_ckp) -> w_ckp - row_mean
 
- This is applied to the VARIATIONAL MEAN of w_{c,k,p} after every
- Phase-2 gradient update. Enforces (1/P) sum_p w_{c,k,p} = 0 for each
- (c, k), eliminating the K-dimensional scale ambiguity (the paper).
+ Used by the simulator; the model enforces the same constraint via the
+ deterministic `w_ckp` site. Enforces (1/P) sum_p w_{c,k,p} = 0 for each
+ (c, k), eliminating the K-dimensional scale ambiguity.
 """
 
 from __future__ import annotations
@@ -65,14 +65,14 @@ def make_lower_triangular_A_direct(
 ) -> jnp.ndarray:
     """Like make_lower_triangular_A but takes an already-positive diagonal.
 
- audit (): the legacy `make_lower_triangular_A` applies
+ The legacy `make_lower_triangular_A` applies
  softplus to a Normal-sampled `a_diag_raw`, which pins the diagonal at
  softplus(0)≈0.693 when shrinkage tightens (a_prior_std → 0). This breaks
  K_eff pruning under MGP/ARD priors — the diagonal can never reach 0.
 
- Paper the paper (line 864) actually specifies
+ The paper specifies
  a_{c,k,k} ~ HalfNormal(ψ_{c,k}^{-1/2})
- sampled directly. This helper supports that paper-faithful path: the
+ sampled directly. This helper supports that path: the
  caller draws a_diag_pos from HalfNormal(prior_std) and we plug it in
  without a redundant softplus.
  """
@@ -90,7 +90,7 @@ def project_per_factor_normalization(w_ckp: jnp.ndarray) -> jnp.ndarray:
     """Subtract per-factor mean from activation-spline coefficients.
 
  Input shape: (C, K, P). For each (c, k), subtract the mean over p.
- Enforces (1/P) sum_p w_{c,k,p} = 0 — the paper / (S4).
+ Enforces (1/P) sum_p w_{c,k,p} = 0 (paper Eq. 15).
  """
     mean_per_factor = jnp.mean(w_ckp, axis=-1, keepdims=True)  # (C, K, 1)
     return w_ckp - mean_per_factor

@@ -1,6 +1,6 @@
 """Efficient Gaussian log-pdf evaluation via Sylvester + Woodbury.
 
-Implements the closed-form identities from the paper and inference plan the paper:
+Implements the closed-form identities from the paper (App. B.3):
 
  Sigma_c(s) = A_c diag(nu_c(s)) A_c^T + diag(D_c) (R x R)
 

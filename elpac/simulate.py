@@ -1,6 +1,6 @@
 """Synthetic data generator for elpac.
 
-Matches the paper generative process with the simplifications needed
+Matches the paper's generative process with the simplifications needed
 for a tractable small-scale ground truth:
 
  - 4 modalities {A, T, N, B}, R biomarkers partitioned arbitrarily.
@@ -13,11 +13,11 @@ for a tractable small-scale ground truth:
  with lower-triangular positive-diagonal A_c and per-factor normalized w_ckp.
 
 The simulator respects the same constraints the model enforces:
- * (S1) lower-triangular A with positive diagonal
- * (S3) sign-constrained velocity (softplus / -softplus)
- * (S4) per-factor (1/P) sum_p w_ckp = 0
- * (R1) non-constant nu_k(s) — uses a random non-trivial w_ckp
- * (A1) anchor subjects near s=0.95, controls near s=0.01
+ * lower-triangular A with positive diagonal
+ * sign-constrained velocity (softplus / -softplus)
+ * per-factor (1/P) sum_p w_ckp = 0
+ * non-constant nu_k(s) — uses a random non-trivial w_ckp
+ * anchor subjects near s=0.95, controls near s=0.01
 
 Returns a SyntheticTruth dataclass with every quantity needed for the
 recovery metrics in the paper.
@@ -109,9 +109,9 @@ class SyntheticTruth:
     C_cog: np.ndarray             # (n,) cognitive score (NaN if missing)
     ages: np.ndarray              # (n,)
     Theta_0: np.ndarray           # (R,) shared healthy reference
-    phase_transition_s_star: float | None = None  # for the paper recovery
-    # Ground-truth global pathological severity G*_i on Option C of `global_stage.md`
-    # the paper computed from the TRUE θ*_c trajectory. Shape (n,). See
+    phase_transition_s_star: float | None = None  # for recovery metrics
+    # Ground-truth global pathological severity G*_i
+    # computed from the TRUE θ*_c trajectory. Shape (n,). See
     # `compute_G_star_path_from_truth` for the formula. Optional for backwards
     # compatibility with truth objects pickled before.
     G_star_truth: np.ndarray | None = field(default=None)
@@ -391,7 +391,7 @@ def compute_G_star_path_from_truth(
     phi = phi / float(n_modalities)                              # (C, J+1), Φ_c^path(s) unnormalized
 
     # Normalize by the max terminal (s=1) displacement across subtypes so the
-    # scale is in [0, 1] and comparable to global_stage.md the paper (Option C).
+    # scale is in [0, 1].
     max_terminal = float(np.maximum(phi[:, -1].max(), 1e-8))
     phi_norm = phi / max_terminal                                # (C, J+1)
 
@@ -418,7 +418,7 @@ def simulate_synthetic(
     phase_transition_s_star: float = 0.5,
     include_cognition: bool = False,
     cognition_noise: float = 0.3,
-    cognition_model: str = "ispline",  # the paper (Commit C,): paired with model.ModelConfig.chi_c_basis default flip. legacy callers must pass cognition_model="polynomial" explicitly.
+    cognition_model: str = "ispline",  # pair with ModelConfig.chi_c_basis; legacy callers must pass cognition_model="polynomial" explicitly.
     ispline_n_basis: int = 3,
     ispline_degree: int = 2,
     use_rich_nu: bool = False,
@@ -427,54 +427,53 @@ def simulate_synthetic(
     cognition_missing_rate: float = 0.2,
     mu_c_noise_std: float = 0.05,
     theta_0_prior_std: float = 0.3,
-    # per the paper (the paper Steps 7, 11, 13 + the paper). When True, draw
+    # When True, draw
     # onset_times and beta_velocity jointly per modality from
     # N(center, sigma_eta^2 Σ^(m)) and N(mean, sigma_beta^2 Σ^(m))
-    # respectively, with Σ^(m) an exponential kernel on the 1-D biomarker-index
-    # grid (length_scale=`spatial_length_scale`, default 0.3). Default False
-    # preserves the legacy iid Normal draws.
+    # respectively, with Σ^(m) the per-modality kernel from
+    # `build_per_modality_kernels` (length_scale=`spatial_length_scale`, default 0.3). False
+    # uses the legacy iid Normal draws.
     use_spatial_sim: bool = True,
     spatial_length_scale: float = 0.3,
     sigma_eta_spatial: float = 0.3,
     sigma_beta_spatial: float = 0.25,
-    # Step 5c (): optional externally-provided per-modality kernels
+    # Optional externally-provided per-modality kernels
     # [K_A, K_T, K_N, K_blood]. When provided AND use_spatial_sim=True, the
     # paper-family kernels (RBF / Laplacian / CAR / Identity) are replaced by
-    # these user-supplied kernels. Useful for real-data flexibility where
+    # these user-supplied kernels. Useful when
     # Σ^(m) comes from an atlas / connectome / adjacency graph rather than a
     # 1-D biomarker-index grid. Shapes must match (R_A, R_A), (R_T, R_T),
-    # (R_N, R_N), (R_blood, R_blood). None (default) preserves Step 5b paper
-    # kernels.
+    # (R_N, R_N), (R_blood, R_blood). None (default) uses the built-in
+    # kernel families.
     external_kernels: Optional[List[np.ndarray]] = None,
-    # Step 3-sim (): paper-compliant w_ckp prior draw on simulator side.
+    # Draw w_ckp from the model's smoothness prior (paper Eq. 15).
     # When True, replace the deterministic 6-shape template for w_ckp with random
-    # draws from the paper prior:
+    # draws from the model's prior:
     # tau_k ~ Half-Normal(sigma_tau) (per subtype, per factor)
     # w_{c,k} ~ N(0, tau_k^2 (K_B + eps_B I_P)^{-1}) (P-vec)
-    # then apply (S4) per-factor zero-mean projection. The model's K_B smoothness
-    # prior (--use-paper-w-ckp-smoothness, Step 3) matches this generative draw.
-    # Default False preserves the 6-shape template (recovery-test interpretability).
+    # then apply per-factor zero-mean projection. The model's K_B smoothness
+    # prior (use_paper_w_ckp_smoothness) matches this generative draw.
+    # False uses the 6-shape template (recovery-test interpretability).
     w_ckp_paper_prior: bool = True,
     w_ckp_sigma_tau: float = 0.1,
     w_ckp_eps_B: float = 1e-3,
-    # Path C (): project the deterministic 3-shape / 6-shape w_ckp
+    # Project the deterministic 3-shape / 6-shape w_ckp
     # templates through the K_B smoother. Each template is replaced with
     # w_smooth = (I + lambda * K_B)^{-1} * w_template
     # then optionally rescaled to preserve L2 norm per (c, k). Result: smooth
-    # (paper-compliant shape) BUT high-amplitude (recoverable signal).
-    # Default 0.0 = no smoothing, preserves.
+    # (prior-consistent shape) BUT high-amplitude (recoverable signal).
+    # Default 0.0 = no smoothing.
     w_ckp_kb_smooth_strength: float = 0.0,
     w_ckp_kb_smooth_preserve_amplitude: bool = True,
-    # fix. When True, draw A_c diagonal
+    # When True, draw A_c diagonal
     # from HalfNormal(scale=sim_halfnormal_diag_scale) directly, matching
-    # the model's use_paper_halfnormal_diag=True prior. Default flipped to
-    # True on to keep simulator and model priors paired by
-    # default (prior asymmetry was a Track-T1 BLOCKER).
+    # the model's use_paper_halfnormal_diag=True prior. Default True keeps
+    # simulator and model priors paired.
     # Scale convention: default 1.0 matches the model's default a_prior_std
     # for MGP with κ=1 / ARD with α=1. If the model sweep tunes shrinkage
     # strength, the paired simulator draw stays at this fixed scale so that
     # recovery is evaluated against a consistent truth magnitude.
-    # Callers that need an earlier-version legacy softplus(Normal(0.5, 0.2)) truth —
+    # Callers that need an legacy softplus(Normal(0.5, 0.2)) truth —
     # e.g. tests, calibration JSONs, misspec sweeps validated on earlier
     # data — must pass sim_halfnormal_diag=False explicitly.
     sim_halfnormal_diag: bool = True,
@@ -482,38 +481,37 @@ def simulate_synthetic(
 ) -> SyntheticTruth:
     """Generate one synthetic dataset matching the paper's generative process.
 
- ``use_rich_nu`` (Phase 1b ν redesign): when True, replace the 3-shape
+ ``use_rich_nu``: when True, replace the 3-shape
  (rise/fall/mid-peak, amp ≈ ±0.9) w_ckp generator with a 6-shape template
  bank (logistic rise/fall, sharp Gaussian peak, early bimodal, late
  plateau, tanh step) at amplitude ``nu_amplitude_scale`` (default 2.0),
  plus subtype-specific emphasis weights. Default False preserves the
- legacy the prior behavior for every existing run.
+ legacy behavior.
 
- ``backward_generation`` (Step 1b W1+W2, the paper Steps 9+15+16):
- when True, switch to the paper-faithful reverse-time construction:
+ ``backward_generation``: when True, switch to the paper's reverse-time
+ (endpoint-anchored) construction:
  1. Sample ``mu_c`` from an anchor-signature-centered prior (analog of
- paper Step 2 ``mu_c ~ N(bar_Y_c, tilde_Omega_c)``), using the
+ the model's ``mu_c ~ N(bar_Y_c, tilde_Omega_c)``), using the
  clinical-signature-derived endpoint as the anchor-mean surrogate.
- 2. Pin ``Theta_{c,J} = mu_c`` (Step 9).
- 3. Backward-integrate ``theta_{c,j-1} = theta_{c,j} - Delta * V[c, j]``
- (Step 15). ``theta_{c,0}`` is whatever the recursion produces.
+ 2. Pin ``Theta_{c,J} = mu_c``.
+ 3. Backward-integrate ``theta_{c,j-1} = theta_{c,j} - Delta * V[c, j]``.
+ ``theta_{c,0}`` is whatever the recursion produces.
  4. Sample ``Theta_0 ~ N(0, theta_0_prior_std)`` as a SEPARATE reference
- point (paper Step 1). The soft-origin factor (Step 16) is now a
+ point. The soft-origin factor is then a
  non-trivial prior PULL rather than an equality.
- Default False preserves the legacy forward-from-Theta_0 path.
+ Default True; False uses the legacy forward-from-Theta_0 path.
 
- ``cognition_missing_rate`` (Step 1b W4): fraction of subjects whose
+ ``cognition_missing_rate``: fraction of subjects whose
  ``C_cog`` is randomly set to NaN (exercises model's ``C_cog_mask`` path).
  Default 0.2 matches real-data expectation. Applied AFTER observation
  (modality-block) missingness so the two mechanisms are independent.
 
- ``cognition_model`` default flipped from "linear" → "polynomial" (Step 1b
- B5, the paper) so the simulator's cognition surface matches the model's
+ ``cognition_model="polynomial"`` makes the simulator's cognition surface match the model's
  cubic chi_c form. Callers that need the legacy path must pass
  ``cognition_model="linear"`` AND ``backward_generation=False`` AND
  ``cognition_missing_rate=0.0`` explicitly.
 
- ``cognition_model="ispline"`` (Step 6, the paper): sample per-
+ ``cognition_model="ispline"``: sample per-
  subtype I-spline coefficients ``chi_c_raw_true`` of shape (C, ispline_n_basis),
  apply softplus to enforce nonneg, and combine with the I-spline basis
  evaluated at each subject's stage. The resulting chi_c(s) is a monotone
@@ -530,14 +528,14 @@ def simulate_synthetic(
  in backward mode this parameter controls the prior std for experimental
  clarity. Default 0.3 matches legacy.
 
- ``external_kernels`` (Step 5c,): optional list of 4 np.ndarray
+ ``external_kernels``: optional list of 4 np.ndarray
  per-modality kernels [K_A, K_T, K_N, K_blood] to use IN PLACE of the
  paper's modality-specific kernels (RBF / Laplacian / CAR / Identity).
  Only consumed when ``use_spatial_sim=True``. Shapes must be
  (R_A, R_A), (R_T, R_T), (R_N, R_N), (R_blood, R_blood). Each kernel is
  used for BOTH the onset-time MVN and the velocity-basis
- MVN. None (default) preserves Step 5b paper-kernel
- behavior. When ``external_kernels`` is provided, the caller
+ MVN. None (default) uses the built-in kernel
+ families. When ``external_kernels`` is provided, the caller
  is responsible for ensuring the same bundle is plumbed into the
  ``model.ModelConfig.external_kernels_path`` so simulator + model use
  matched per-modality kernels.
@@ -582,9 +580,9 @@ def simulate_synthetic(
                 center = onset_center_by_modality[m] + 0.1 * c  # offset by subtype
                 onset_times[c, r] = np.clip(center + rng.normal(scale=0.08), 0.05, 0.95)
     else:
-        # the paper: per-modality MVN draw.
-        # Build Σ^(m) per modality via shared utility. Step 5c: if
-        # `external_kernels` is supplied, the paper-family kernels are
+        # Per-modality MVN draw.
+        # Build Σ^(m) per modality via shared utility. If
+        # `external_kernels` is supplied, the built-in kernels are
         # bypassed and the user-supplied bundle is used instead.
         mod_sizes = [shape.R_A, shape.R_T, shape.R_N, shape.R_blood]
         Sigma_per_mod = build_per_modality_kernels(
@@ -628,7 +626,7 @@ def simulate_synthetic(
 
     beta_velocity = _sample_monotone_velocity_coeffs(rng, C, R, Q, modality_of_r)
     if use_spatial_sim:
-        # the paper spatial prior on beta_velocity. The
+        # The spatial prior on beta_velocity. The
         # original _sample_monotone_velocity_coeffs returns a (C, R, Q) array
         # with per-(c, m, q) modality signature means + iid noise. Here we
         # REPLACE the iid noise with a spatially correlated draw per (c, m, q):
@@ -659,8 +657,8 @@ def simulate_synthetic(
         modality_weight = clinical_signatures[:, modality_of_r]   # (C, R)
         subtype_mean = modality_weight[:, :, None]                # (C, R, 1)
 
-        # Build Σ^(m) per modality with sigma_beta_spatial scale. Step 5c:
-        # thread `external_kernels` through so both onset and velocity draws
+        # Build Σ^(m) per modality with sigma_beta_spatial scale.
+        # Thread `external_kernels` through so both onset and velocity draws
         # use the SAME per-modality kernel bundle (matches model side).
         mod_sizes_b = [shape.R_A, shape.R_T, shape.R_N, shape.R_blood]
         Sigma_beta_list = build_per_modality_kernels(
@@ -706,7 +704,7 @@ def simulate_synthetic(
     )                                                                # (C, J+1, R)
     delta_j = 1.0 / J
 
-    # Forward vs backward integration branch (Step 1b W1+W2).
+    # Forward vs backward integration branch.
     theta_shells = np.zeros((C, J + 1, R), dtype=np.float32)
     if not backward_generation:
         # LEGACY forward path — theta[c, 0] == Theta_0, mu_c emerges as endpoint.
@@ -715,8 +713,8 @@ def simulate_synthetic(
             theta_shells[:, j, :] = theta_shells[:, j - 1, :] + delta_j * V[:, j, :]
         mu_c = theta_shells[:, -1, :].copy()   # (C, R) — integrated endpoints
     else:
-        # BACKWARD generation (the paper Steps 9 + 15 + 16).
-        # Step 2 analog: sample mu_c FIRST from an anchor-signature-centered
+        # BACKWARD (endpoint-anchored) generation.
+        # Sample mu_c FIRST from an anchor-signature-centered
         # prior. The clinical-signature-implied endpoint (integrated from zero
         # with the same velocity profile) serves as the anchor-mean surrogate
         # ``m_c`` — this is the simulator's stand-in for the model's bar_Y_c
@@ -728,13 +726,13 @@ def simulate_synthetic(
         mu_c = (mu_c_mean +
                 rng.normal(loc=0.0, scale=mu_c_noise_std,
                            size=(C, R)).astype(np.float32))           # (C, R)
-        # Step 9: pin terminal state to mu_c.
+        # Pin terminal state to mu_c.
         theta_shells[:, -1, :] = mu_c
-        # Step 15: deterministic backward recursion.
+        # Deterministic backward recursion.
         for j in range(J, 0, -1):
             theta_shells[:, j - 1, :] = theta_shells[:, j, :] - delta_j * V[:, j, :]
         # Theta_0 is already sampled above as an independent reference point
-        # (N(0, theta_0_prior_std)), so the soft-origin factor Step 16
+        # (N(0, theta_0_prior_std)), so the soft-origin factor
         # p(theta[c,0] | Theta_0) is a non-trivial prior pull, not an equality.
 
     # --- Factor covariance --------------------------------------------
@@ -744,7 +742,7 @@ def simulate_synthetic(
         A_raw = rng.normal(loc=0.0, scale=0.4, size=(R, K)).astype(np.float32)
         A_raw = np.tril(A_raw)
         if sim_halfnormal_diag:
-            # Paper the paper: diag ~ HalfNormal(scale). Matches the
+            # diag ~ HalfNormal(scale) (paper Sec. 2.4). Matches the
             # model's --use-paper-halfnormal-diag prior.
             diag_vals = np.abs(rng.normal(
                 loc=0.0, scale=float(sim_halfnormal_diag_scale), size=K
@@ -760,7 +758,7 @@ def simulate_synthetic(
     # NOT apply shrinkage ordering; the metric's factor-permutation search
     # accommodates arbitrary post-fit factor ordering.
     #
-    # Phase 1b ν redesign: when `use_rich_nu=True`, replace the 3-shape bank
+    # When `use_rich_nu=True`, replace the 3-shape bank
     # (rise/fall/mid-peak, amp ≈ ±0.9) with a 6-shape template bank (logistic
     # rise/fall, sharp Gaussian peak, early bimodal, late plateau, tanh step)
     # at amplitude `nu_amplitude_scale` (default 2.0), plus subtype-specific
@@ -768,7 +766,7 @@ def simulate_synthetic(
     w_ckp = np.zeros((C, K, P), dtype=np.float32)
     knot_positions = np.linspace(0.0, 1.0, P)
     if w_ckp_paper_prior:
-        # Paper the paper: draw w_{c,k} ~ N(0, tau_k^2 (K_B + eps_B I_P)^{-1})
+        # Draw w_{c,k} ~ N(0, tau_k^2 (K_B + eps_B I_P)^{-1})
         # with tau_k ~ Half-Normal(w_ckp_sigma_tau). This replaces the hand-crafted
         # shape templates with the paper's smoothness-prior generative draw on the
         # simulator side, paired with the model's --use-paper-w-ckp-smoothness flag.
@@ -838,13 +836,13 @@ def simulate_synthetic(
                 template = shape_templates[k % len(shape_templates)]
                 base = amp * float(subtype_weights[c, k]) * template(knot_positions)
                 base = base + rng.normal(scale=0.1, size=P).astype(np.float32)
-                base = base - base.mean()   # per-factor zero-mean 
+                base = base - base.mean()   # per-factor zero-mean
                 w_ckp[c, k, :] = base.astype(np.float32)
 
-    # Path C (): K_B-smooth the deterministic templates so they
-    # match the paper smoothness prior in SHAPE while retaining
+    # K_B-smooth the deterministic templates so they
+    # match the smoothness prior in SHAPE while retaining
     # (optionally, via rescale) the original amplitude for recoverable signal.
-    # Applied AFTER the template / rich_nu branches, AFTER the paper-prior
+    # Applied AFTER the template / rich_nu branches, AFTER the smoothness-prior
     # branch (which bypasses templates entirely). No-op when
     # w_ckp_kb_smooth_strength == 0.
     if float(w_ckp_kb_smooth_strength) > 0.0 and not w_ckp_paper_prior:
@@ -992,10 +990,10 @@ def simulate_synthetic(
         # Per-subtype variation lets the model distinguish subtypes via chi_c.
         chi_c_raw_true = rng.normal(loc=np.array([5.0, 5.0, 5.5]), scale=0.3,
                                     size=(C, 3)).astype(np.float32)
-        # Audit B1: np.logaddexp(0, x) is numerically stable softplus.
+        # np.logaddexp(0, x) is numerically stable softplus.
         chi_c_true = np.logaddexp(0.0, chi_c_raw_true)  # (C, 3), softplus-positive
     elif include_cognition and cognition_model == "ispline":
-        # Paper the paper: chi_c is a monotone I-spline with nonneg
+        # chi_c is a monotone I-spline with nonneg
         # coefficients. Sample per-subtype softplus-pre-image so chi_c is
         # always monotone non-decreasing with chi_c(0) = 0. Design the mean
         # loc so sum of coefficients ~ 16 to match the polynomial dynamic
@@ -1009,7 +1007,7 @@ def simulate_synthetic(
             rng.normal(loc=target + c_offset[:, None], scale=0.3,
                        size=(C, ispline_n_basis)).astype(np.float32)
         )
-        # Audit B1: np.logaddexp(0, x) is numerically stable softplus.
+        # np.logaddexp(0, x) is numerically stable softplus.
         chi_c_true = np.logaddexp(0.0, chi_c_raw_true)  # (C, n_basis), softplus-positive
     else:
         chi_c_true = None
@@ -1055,7 +1053,7 @@ def simulate_synthetic(
                 chi_s = float(chi_c_true[c_i] @ s_basis)
                 baseline = 2.0 + 0.3 * X[i, 2] + chi_s
             elif cognition_model == "ispline":
-                # Paper the paper: chi_c is a monotone I-spline. Evaluate the
+                # chi_c is a monotone I-spline. Evaluate the
                 # I-spline basis at s_i (cached) and dot with the softplus-positive
                 # coefficients. chi_c(s) is monotone non-decreasing with chi_c(0)=0.
                 if s_i not in ispline_eval_cache:
@@ -1083,7 +1081,7 @@ def simulate_synthetic(
                     mask[i, start:end] = 0.0
                     Y[i, start:end] = 0.0  # zero-fill missing positions
 
-    # Cognition missingness (Step 1b W4). Independently set a fraction of
+    # Cognition missingness. Independently set a fraction of
     # cognitive scores to NaN — exercises the model's C_cog_mask branch. Only
     # meaningful when cognition was observed in the first place; NaNs from
     # `include_cognition=False` already dominate. The model downstream reads
@@ -1093,8 +1091,8 @@ def simulate_synthetic(
         drop = rng.uniform(size=n) < cognition_missing_rate
         C_cog[drop] = np.nan
 
-    # Ground-truth global pathological severity G*_i (, the paper).
-    # Computed on the true θ*_c trajectory via Option C of global_stage.md the paper:
+    # Ground-truth global pathological severity G*_i.
+    # Computed on the true θ*_c trajectory:
     # per-modality standardized Euclidean displacement from the s=0 anchor,
     # averaged over modalities, normalized by the max terminal displacement.
     G_star_truth = compute_G_star_path_from_truth(

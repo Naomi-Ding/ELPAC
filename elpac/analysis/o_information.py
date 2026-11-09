@@ -200,8 +200,8 @@ def omega_delta_method_ci(
 
  ``V_Sigma`` (and ``V_psi`` after chain rule, if ``dSigma_dvec`` given) must
  be the *finite-n* covariance of the estimator — i.e. Cov(vec Σ̂) at the
- observed sample size. The parametric-bootstrap path (paper line 1132,
- "For VI: use parametric bootstrap") returns exactly this. No additional
+ observed sample size. The parametric-bootstrap path (recommended under VI)
+ returns exactly this. No additional
  /√n scaling is applied.
 
  Variance of Ω̂:
@@ -213,7 +213,7 @@ def omega_delta_method_ci(
  The ``n`` argument is accepted for API compatibility but unused in the
  width (the finite-n scale is already baked into V_Sigma). Earlier code
  divided by √n a second time, producing CIs √n too narrow at n~1000 and
- guaranteeing the paper coverage-gate failure.
+ guaranteeing coverage failure.
 
  Returns ``(Omega_hat, ci_lo, ci_hi, sigma_Omega)``.
  """

@@ -65,7 +65,7 @@ liquid_association_trajectory = liquid_association_finite_diff
 
 
 # ---------------------------------------------------------------------------
-# A2: Closed-form liquid association (the paper /.7, C.9)
+# Closed-form liquid association (not reported in the paper)
 # ---------------------------------------------------------------------------
 
 def liquid_association_closed_form(

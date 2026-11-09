@@ -9,11 +9,11 @@ and the amortized recognition network that replaces per-subject mean-field.
 The guide is a custom callable that wraps AutoNormal for the globals and uses
 a flax MLP for q(c_i, S_i | Y_i, X_i).
 
-For S3 first-pass, we also support a *non-amortized* guide using
-AutoNormal for everything (simpler, faster to debug). The `build_guide()`
-function returns either variant.
+We also support a *non-amortized* guide using
+AutoNormal for everything (simpler, faster to debug). `run_phase` selects
+the guide via `TrainConfig.guide_type`.
 
-Frozen-mean Phase 2 variant (, the paper).
+Frozen-mean Phase 2 variant.
 ------------------------------------------------------------------
 `run_phase(..., frozen_mean_source=...)` and `run_full_pipeline(...,
 frozen_mean_source=...)` support a mean-fixed Phase 2 ablation that holds the
@@ -59,7 +59,7 @@ from .model import ModelConfig, build_numpyro_model
 from .utils.bspline import eval_bspline_basis
 
 # -----------------------------------------------------------------------------
-# Frozen-mean Phase 2 variant (/ the paper)
+# Frozen-mean Phase 2 variant
 # -----------------------------------------------------------------------------
 
 # Sample sites that together determine the mean trajectory theta_c(s). Freezing
@@ -162,7 +162,7 @@ import flax.linen as nn
 
 
 class RecognitionNet(nn.Module):
-    """Paper the paper recognition network.
+    """Recognition network q(c_i, S_i | Y_i, X_i) (paper Sec. 2.6).
 
  Input: [Y_masked, mask, X] shape (2R + p_x,)
  Output: subtype logits (C,) + per-c stage (mu, log_sigma)
@@ -222,9 +222,9 @@ def _build_model_inputs(
     """Build the input dict consumed by the NumPyro model and guides.
 
  ``cfg`` / ``model_shape`` (both optional, mutually consistent — pass
- one): when the inference shape differs from the truth shape (Option L:
+ one): when the inference shape differs from the truth shape (e.g.
  ``--model-k``/``--model-p``/``--model-j`` overrides on synthetic, 
- the paper P/J sensitivity sweep), pass the model-side P/J here so
+ a P/J sensitivity sweep), pass the model-side P/J here so
  ``psi_basis_cache`` is built with the model's P (rows) and the model's
  J+1 (grid points). ``cfg`` (a ModelConfig) takes precedence; if absent,
  falls back to ``model_shape``; if both absent, uses ``truth.shape`` for
@@ -286,7 +286,7 @@ def _mom_warmstart_init_values(
  For each subtype c, estimate Σ̂_c from anchor-cohort residuals (which
  target Ã Ã^T + D̂ at s ≈ 1 with Ã = A · diag(ν(1))^{1/2}); take a partial
  Cholesky of (Σ̂_c − D̂_c) to seed a lower-triangular A_c. Per-factor
- normalization (S4) and the activation coefficients self-adjust during SVI;
+ normalization and the activation coefficients self-adjust during SVI;
  initial w_ckp ≈ 0 so ν_c(s) ≈ 1 across stage at the start.
 
  Returns a dict of init values for sites: a_flat, a_diag_pos OR a_diag_raw
@@ -399,14 +399,14 @@ def run_phase(
  FROZEN_MEAN_SITES are clamped at their Phase 1 posterior-median values
  for the entire Phase 2 run; only the covariance module (A_c, nu_c, D_c)
  and its shrinkage hyper-parameters are optimized. Implements the
- mean-fixed covariance ablation (/ the paper). Silently
+ mean-fixed covariance ablation. Silently
  ignored when `phase == "phase1"`. Returns the extra key `frozen_mean`
  in the output dict so callers can audit which values were frozen.
  """
     assert phase in {"phase1", "phase2"}
     model = build_numpyro_model(cfg, phase=phase)
 
- # ---- Frozen-mean Phase 2 variant (/ the paper) ----
+ # ---- Frozen-mean Phase 2 variant ----
  # Condition the model on Phase 1 posterior medians for the mean-trajectory
  # sites; block the guide from sampling those sites. Result: Phase 2 SVI
  # optimizes only the covariance module variational params.
@@ -544,7 +544,7 @@ def run_phase(
  # Hide logit_S AND the deterministic sites w_ckp / A_c — NumPyro
  # AutoGuideList raises if deterministic sites appear in sub-guides.
         hide_from_global = ["logit_S", "w_ckp", "A_c", "q_c"]
- # the paper: when paper spatial priors are on, `onset_times`, `beta_vel`,
+ # When spatial priors are on, `onset_times`, `beta_vel`,
  # and (cascade-on branch) `onset_eta` become deterministic sites —
  # hide them from the AutoLowRank sub-guide as well.
         if getattr(cfg, "use_paper_spatial_priors", False):
@@ -552,7 +552,7 @@ def run_phase(
             if getattr(cfg, "use_paper_cascade_prior", False):
                 hide_from_global.append("onset_eta")
         elif getattr(cfg, "use_paper_cascade_prior", False):
- # the paper: cascade prior makes `onset_times` deterministic; hide it
+ # The cascade prior makes `onset_times` deterministic; hide it
  # from the AutoLowRank sub-guide so only the raw sample sites are
  # variationalised.
             hide_from_global.append("onset_times")
@@ -568,7 +568,7 @@ def run_phase(
         from .amortized_guide import make_perSubject_logit_s_guide
         guide.append(make_perSubject_logit_s_guide(cfg, phase=phase))
     elif train_cfg.guide_type == "lowrank_amortized":
- # Principled combination per the paper + the paper:
+ # Combination used in the paper:
  # • globals: low-rank multivariate Gaussian (captures cross-parameter
  # correlations that mean-field drops — needed for factor recovery)
  # • per-subject logit_S: amortized encoder MLP (shared weights across
@@ -586,7 +586,7 @@ def run_phase(
             if getattr(cfg, "use_paper_cascade_prior", False):
                 hide_lowrank_amort.append("onset_eta")
         elif getattr(cfg, "use_paper_cascade_prior", False):
- # the paper: the cascade prior makes `onset_times` a deterministic
+ # The cascade prior makes `onset_times` a deterministic
  # site computed from (t_ATN_raw, t_tilde_B, onset_eta). Hide it
  # from the AutoLowRank sub-guide (deterministic sites are
  # rejected) so only the new raw sample sites are variationalised.
@@ -686,7 +686,7 @@ def run_phase(
 
     final_params = svi.get_params(svi_state)
 
- # (S4) per-factor normalization of w_ckp is enforced at model.py:1080 via
+ # Per-factor normalization of w_ckp is enforced in model.py via
  # `numpyro.deterministic("w_ckp", w_ckp_raw - mean(axis=-1))`. No post-hoc
  # projection on variational params is needed — all downstream consumers read
  # post["w_ckp"] (normalized).
@@ -762,7 +762,7 @@ def extract_posterior_means(
  theta_shells) are recovered by running a trace with the median values
  substituted.
 
- ``frozen_mean`` is the dict returned by ``run_phase(..., frozen_mean_source=...)["frozen_mean"]`` (/ the paper). When non-empty, those
+ ``frozen_mean`` is the dict returned by ``run_phase(..., frozen_mean_source=...)["frozen_mean"]``. When non-empty, those
  values are merged into the median dict so the downstream model retrace
  recomputes derived sites (theta_c_grid, A_c, w_ckp,...) under the frozen
  mean rather than against a fresh prior sample. Without this merge the guide
@@ -803,7 +803,7 @@ def extract_posterior_means(
             elif site["type"] == "deterministic":
                 medians[name] = site["value"]
 
- # Frozen-mean Phase 2 (): override the median dict for sites that
+ # Frozen-mean Phase 2: override the median dict for sites that
  # were `condition`-clamped during training. AutoLowRank / AutoNormal skip
  # conditioned sites, so they are absent from `guide.median` output;
  # substituting the frozen values here ensures the retrace below recomputes
@@ -996,7 +996,7 @@ def _phase1_trajectories_at_subject_stages(
         mod_signs[se] = -1.0
 
     raw = np.einsum("crq,jq->cjr", beta_vel, B_shell)
- # Audit B1: np.logaddexp(0, x) is numerically stable softplus (matches
+ # np.logaddexp(0, x) is numerically stable softplus (matches
  # heldout.py + simulate.py migration).
     softplus_raw = np.logaddexp(0.0, raw)
     vmag = mod_signs[None, None, :] * softplus_raw
@@ -1077,7 +1077,7 @@ def _subtype_posterior_from_trace(
         mod_signs[se] = -1.0
 
     raw = np.einsum("crq,jq->cjr", beta_vel, B_shell)
- # Audit B1: np.logaddexp(0, x) is numerically stable softplus (matches
+ # np.logaddexp(0, x) is numerically stable softplus (matches
  # heldout.py + simulate.py migration).
     softplus_raw = np.logaddexp(0.0, raw)
     vmag = mod_signs[None, None, :] * softplus_raw
@@ -1154,7 +1154,7 @@ def run_full_pipeline(
 
  frozen_mean_source : optional path or dict with Phase 1 posterior medians
  for the mean-trajectory sites. When provided, Phase 2 runs in the
- frozen-mean ablation mode (/ the paper) — the mean
+ frozen-mean ablation mode — the mean
  trajectory is held fixed and only the covariance module is trained.
  If `frozen_mean_source == "phase1_in_memory"`, the in-memory Phase 1
  posterior computed just above is used (convenient default for the
@@ -1263,13 +1263,13 @@ def run_full_pipeline(
  # delta_shrink: init to identity so psi_{c,k} = 1 (no shrinkage)
             init_values["delta_shrink"] = jnp.ones((cfg.C, cfg.K))
         init_values["tau_k"] = jnp.ones(cfg.K)
- # w ~ 0 so nu_{c,k}(s) ~ 1 initially — the paper recommendation.
- # Under Step 3 (paper K_B smoothness prior) the sample site is
- # `w_ckp_raw_std` (pre-Cholesky iid-standard-Normal); the prior version uses
+ # w ~ 0 so nu_{c,k}(s) ~ 1 initially.
+ # Under the K_B smoothness prior the sample site is
+ # `w_ckp_raw_std` (pre-Cholesky iid-standard-Normal); the legacy prior uses
  # `w_ckp_raw` directly. Init the correct site so the guide actually
- # starts at ν ≈ 1 — prior to this fix (Blocker 2,), only
- # `w_ckp_raw` was initialised, which is IGNORED when the paper-
- # smoothness flag is on, leaving the guide at the default noisy init.
+ # starts at ν ≈ 1. Initializing only
+ # `w_ckp_raw` would be IGNORED when the smoothness flag is on,
+ # leaving the guide at the default noisy init.
         if getattr(cfg, "use_paper_w_ckp_smoothness", False):
             init_values["w_ckp_raw_std"] = jnp.zeros((cfg.C, cfg.K, cfg.P))
         else:
@@ -1288,7 +1288,7 @@ def run_full_pipeline(
         else:
             init_values["delta_shrink"] = jnp.ones((cfg.C, cfg.K))
         init_values["tau_k"] = jnp.ones(cfg.K)
- # Same Blocker-2 fix: thread paper-smoothness flag to pick the right site.
+ # Same as above: use the smoothness flag to pick the right site.
         if getattr(cfg, "use_paper_w_ckp_smoothness", False):
             init_values["w_ckp_raw_std"] = jnp.zeros((cfg.C, cfg.K, cfg.P))
         else:
@@ -1299,7 +1299,7 @@ def run_full_pipeline(
  # state (encoder weights, per-subject locs, etc) so Phase 2 doesn't
  # reinitialize the encoder from scratch. AutoNormal / low_rank standalone
  # also benefit because their `auto_loc` / `auto_scale_tril` get warm-start.
- # Frozen-mean variant (): route Phase 1 posterior as the frozen
+ # Frozen-mean variant: route Phase 1 posterior as the frozen
  # source when the caller passed `"phase1_in_memory"` or left it unset and
  # only mean-fix is desired. Explicit paths / dicts override.
     phase2_frozen = None

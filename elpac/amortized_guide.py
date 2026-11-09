@@ -1,4 +1,4 @@
-"""Amortized recognition-network guide ().
+"""Amortized recognition-network guide.
 
 Provides a callable guide that replaces the per-subject `logit_S` auto_loc
 with a flax MLP forward pass. Globals still use mean-field Gaussian via
@@ -6,15 +6,13 @@ numpyro.param. This module is self-contained and independent of AutoNormal.
 
 The guide is switchable: `inference.run_phase` takes a `guide_type` argument
 that selects between:
- - "auto_normal" (AutoNormal for everything; used by the S3 gate)
- - "amortized" (this module; used when test-time sub-second inference
- on new subjects is required; documented as the paper-spec
- default and the target for S4 when real data arrives)
+ - "auto_normal" (AutoNormal for everything; useful for debugging)
+ - "amortized" (this module; enables single-forward-pass inference
+ on new subjects)
 
-For the S3 first pass, we verify the amortized guide is CALLABLE and produces
-a finite ELBO on a small test input. Full end-to-end training with the
-amortized guide is deferred until real-data runs at S4/S5 where the test-time
-inference benefit matters.
+The paper's guide (and the default in run_synthetic.py) is
+"lowrank_amortized": a low-rank multivariate Gaussian over globals combined
+with this recognition network for per-subject stage and subtype.
 """
 
 from __future__ import annotations
@@ -123,11 +121,11 @@ def make_amortized_guide(cfg: ModelConfig, phase: str = "phase2"):
             dist.transforms.SigmoidTransform(),
             init_loc=2.0,
         )
-        # the paper: when the paper cascade prior is on, `onset_times` becomes a
+        # When the cascade prior is on, `onset_times` becomes a
         # deterministic site in the model. Register modality-level onset
         # centers + per-biomarker eta variates instead, matching the new
         # sample-site names (t_ATN_raw, t_tilde_B, onset_eta).
-        # the paper: when the paper spatial prior is on, `onset_eta` is replaced
+        # When the spatial prior is on, `onset_eta` is replaced
         # by per-modality residual sites `onset_eta_mod{m}`, and `beta_vel`
         # is replaced by per-modality residual sites `beta_vel_mod{m}`.
         _use_spatial = getattr(cfg, "use_paper_spatial_priors", False)
@@ -188,7 +186,7 @@ def make_amortized_guide(cfg: ModelConfig, phase: str = "phase2"):
             else:
                 sample_normal("a_diag_raw", (C, K), 2)
             sample_transformed("tau_k", (K,), 1, dist.transforms.ExpTransform())
-            # per the paper: when the smoothness prior
+            # When the smoothness prior
             # is on the model samples `w_ckp_raw_std` (iid N(0, I_P) pre-
             # Cholesky) instead of `w_ckp_raw`. The guide must expose the
             # matching site; the loc/scale on the std variate still form a
@@ -202,7 +200,7 @@ def make_amortized_guide(cfg: ModelConfig, phase: str = "phase2"):
             sample_normal("gamma_0", (), 0)
             sample_normal("gamma_X", (p_x,), 1)
             sample_normal("log_sigma_C", (), 0)
-            # the paper the chi_c_raw site shape depends on
+            # The chi_c_raw site shape depends on
             # cfg.chi_c_basis. Polynomial (default) keeps (C, 3); I-spline uses
             # (C, cfg.chi_c_ispline_n_basis).
             if getattr(cfg, "chi_c_basis", "polynomial") == "ispline":

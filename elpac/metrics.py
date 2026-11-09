@@ -1,11 +1,9 @@
-"""CLI entry point for elpac.
+"""Recovery metrics and calibration for elpac.
 
-Runs the full synthetic pipeline: simulate -> Phase 1 -> Phase 2, extract posterior
-means, compute a few recovery metrics, and dump everything to artifacts/.
-
-Usage:
- conda run -n bayes-pipeline python -m src.run_experiment --shape small-scale
- conda run -n bayes-pipeline python -m src.run_experiment --shape synthetic
+Scores a fitted posterior against simulator ground truth (subtype accuracy and
+ARI, stage Spearman rho and MAE, mean-trajectory error, loading Procrustes
+distance, activation recovery, ECE, Brier, marginal log-likelihood). Called by
+run_synthetic.py at the repository root.
 """
 
 from __future__ import annotations
@@ -132,7 +130,7 @@ def _subtype_posterior_from_trace_for_metric(truth, post, params, phase: str) ->
     R = truth.shape.R
     J = truth.shape.J
     n = len(truth.Y)
-    # Option L: infer K from posterior so K_model can exceed K_truth without
+    # Infer K from posterior so K_model can exceed K_truth without
     # crashing the zero-filled fallback. In phase1 neither w_ckp nor A_c is
     # present; the fallback K doesn't matter (A_c and w_ckp are zeros, so
     # factor terms drop out of the log-likelihood) but needs to be self-consistent.
@@ -183,7 +181,7 @@ def _subtype_posterior_from_trace_for_metric(truth, post, params, phase: str) ->
     else:
         P_fallback = truth.shape.P
         w_ckp = _np.zeros((C, K, P_fallback))
-    # the paper P sensitivity: psi must be evaluated at the inference's P
+    # P sensitivity: psi must be evaluated at the inference's P
     # (= w_ckp.shape[-1]), NOT truth.shape.P. When --model-p override is
     # in effect, these differ; when no override, w_ckp.shape[-1] ==
     # truth.shape.P (=5 default) so the basis is bit-identical.
@@ -296,7 +294,7 @@ def _reconstruct_V_from_post(truth, post) -> np.ndarray:
         mod_signs[se] = -1.0
 
     raw = np.einsum("crq,jq->cjr", beta_vel, B_shell)
-    # Audit B1: np.logaddexp(0, x) is numerically stable softplus.
+    # np.logaddexp(0, x) is numerically stable softplus.
     softplus_raw = np.logaddexp(0.0, raw)
     vmag = mod_signs[None, None, :] * softplus_raw
     onset_arg = (tau_grid[None, :, None] - onset_times[:, None, :]) / np.clip(sharpness[:, None, :], 1e-3, None)
@@ -370,9 +368,8 @@ def _compute_subtype_and_ll_metrics(truth, post, params, phase: str) -> Dict[str
 
  Rebuilds the (n, C) log-joint matrix from posterior means. Subtype c_hat is
  the argmax of q(c_i | Y_i, X_i). Marginal LL is sum_i logsumexp_c (log_lik +
- log_prior) averaged over subjects. These are the actual paper metrics for
- M2 vs M1 vs M0 comparison (the paper claims M2 > M1 > M0 on HELD-OUT LL,
- which correlates tightly with the in-sample marginal LL computed here
+ log_prior) averaged over subjects. These metrics support model comparison
+ (held-out LL correlates tightly with the in-sample marginal LL computed here
  when the models have similar parameter counts per subject).
  """
     from sklearn.metrics import adjusted_rand_score
@@ -382,7 +379,7 @@ def _compute_subtype_and_ll_metrics(truth, post, params, phase: str) -> Dict[str
     R = truth.shape.R
     J = truth.shape.J
     n = truth.shape.n
-    # Option L: model K may differ from truth K when the inference shape
+    # Model K may differ from truth K when the inference shape
     # is over-specified relative to the simulator. Infer model K from the
     # posterior when available (phase2 carries w_ckp / A_c), fall back to
     # truth.K in phase1 where neither exists (same dim as a zero-padded
@@ -711,7 +708,7 @@ def extract_posterior_full(truth, post, params, phase: str,
     R = truth.shape.R
     J = truth.shape.J
     n = int(truth.Y.shape[0])
-    # Option L: infer K from posterior to support K_model ≠ K_truth. The
+    # Infer K from posterior to support K_model ≠ K_truth. The
     # extract_posterior_full sidecar stores the MODEL posterior, so K should
     # match the model's factor count (not truth's). For phase1 / M0 where the
     # posterior carries no factor sites, use the caller-supplied model_K
@@ -1017,8 +1014,7 @@ def _compute_recovery_metrics(truth, post, params, phase: str,
     """Compute synthetic recovery metrics from posterior means.
 
  NOTE: at small-scale with only a few hundred SVI steps, we cannot meet the
- tight paper-the paper thresholds. These metrics are reported as-is (pass/fail
- determined by the S3 gate_results, which uses LOOSE small-scale thresholds).
+ tight full-scale thresholds. These metrics are reported as-is.
 
  ``forward_time=True`` routes the internal theta-shell reconstruction through
  forward integration from ``post["Theta_0"]`` so the permutation-matching
@@ -1068,7 +1064,7 @@ def _compute_recovery_metrics(truth, post, params, phase: str,
     if theta_post_shells is not None:
         theta_post_aligned = theta_post_shells[perm_list]
 
-        # Paper the paper metric: sup_{s, c, r} |theta_c^post(s) - theta_c^true(s)|
+        # Sup-norm metric: sup_{s, c, r} |theta_c^post(s) - theta_c^true(s)|
         # evaluated at INTERIOR stages where subjects actually live. Using shell
         # boundaries (including j=0 = origin) conflates the metric with Theta_0
         # identifiability drift (the model can fit the data with shifted Theta_0
@@ -1242,7 +1238,7 @@ def _compute_recovery_metrics(truth, post, params, phase: str,
         R_ = A_post_s.shape[1]
         K_ = A_post_s.shape[2]
         K_truth = int(truth.A_c.shape[-1])
-        # Option L: K_ (model) may differ from K_truth when the inference
+        # K_ (model) may differ from K_truth when the inference
         # shape is over-specified relative to the simulator. Procrustes /
         # activation_sup_norm / best-factor-permutation require K_ == K_truth
         # (they align a (R, K_) subspace to a (R, K_truth) subspace via an
@@ -1252,7 +1248,7 @@ def _compute_recovery_metrics(truth, post, params, phase: str,
         K_matches = (K_ == K_truth)
 
         grid = np.linspace(0.05, 0.95, 21)
-        # the paper P-sensitivity: when --model-p override is in effect, the
+        # P-sensitivity: when --model-p override is in effect, the
         # inference w_ckp_s has shape (C, K_, P_post) where P_post may differ
         # from truth.shape.P (=5 default). Build separate psi grids per side
         # so the (post, truth) comparison evaluates each at its own basis.
@@ -1328,7 +1324,7 @@ def _compute_recovery_metrics(truth, post, params, phase: str,
                     A_varimax[:, best_fp], w_permuted, truth.A_c[c]
                 )
                 w_rotated = best_R.T @ w_signed
-                # the paper: per-side psi grids (post uses P_post; truth uses
+                # per-side psi grids (post uses P_post; truth uses
                 # truth.shape.P). When P_post == truth.shape.P, both are the
                 # same array so this is bit-exact for legacy P_post = 5.
                 nu_post = np.exp(np.clip(np.einsum("kp,gp->gk", w_rotated, psi_grid), -8.0, 8.0))
@@ -1470,10 +1466,9 @@ def _compute_recovery_metrics(truth, post, params, phase: str,
             metrics["fisher_weights_mae"] = None
 
     # ---------- K_eff: effective number of factors ----------
-    # Paper the paper + the paper: K_eff is determined by the Bhattacharya-Dunson
+    # K_eff is determined by the Bhattacharya-Dunson
     # multiplicative gamma shrinkage on loadings A_c, NOT by tau_k (which is
-    # the activation-smoothness hyperparameter on w_{c,k}). Blocker 3 fix
-    # (, audit): replace tau_k-based proxy with
+    # the activation-smoothness hyperparameter on w_{c,k}). We use
     # loading column norms ||A_c[:, k]||_2 relative to each subtype's max.
     #
     # Procedure: for each subtype c, compute column norms of A_c, normalize
@@ -1490,8 +1485,8 @@ def _compute_recovery_metrics(truth, post, params, phase: str,
         col_norms_rel = col_norms / np.where(max_per_c > 1e-8, max_per_c, 1.0)
         k_eff_per_c = np.sum(col_norms_rel > 0.1, axis=-1)        # (C,)
         k_eff = int(np.median(k_eff_per_c))
-        # Absolute K_eff: columns with ||A_c[:,k]||_2 > τ_abs=0.5 (Blocker 3b
-        #, addresses weak-dep detection — relative metric always
+        # Absolute K_eff: columns with ||A_c[:,k]||_2 > τ_abs=0.5
+        # (addresses weak-dep detection — relative metric always
         # returns K_eff=K when all columns have similar magnitude, even if all
         # weak). τ_abs=0.5 roughly corresponds to "coupling strength detectable
         # above typical noise" given paper's D_c ~ exp(N(-1, 1)) prior.
@@ -1499,8 +1494,8 @@ def _compute_recovery_metrics(truth, post, params, phase: str,
         k_eff_absolute = int(np.median(k_eff_per_c_abs))
         # Composite K_eff: ||A_c[:,k]||_2 · max_s ν_c,k(s) > 0.5. Couples
         # loading magnitude with activation amplitude — detects columns that
-        # are weak by EITHER criterion. Primary metric for the paper + negative
-        # controls (ports logic from scripts/negative_controls.py so the paper
+        # are weak by EITHER criterion. Primary metric for
+        # negative controls (so the
         # summary carries this field on every M0/M1/M2 record).
         k_eff_composite = -1
         k_eff_composite_max = -1

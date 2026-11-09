@@ -1,11 +1,11 @@
-"""Fisher information weights w^FI_{c,m}(s) per paper C.10.
+"""Fisher information weights w^FI_{c,m}(s) (paper App. B.3, Eqs. 31-32).
 
 Quantifies which modality is most informative about disease stage at each point
 along the stage axis, using the fitted (theta_c(s), Sigma_c(s)).
 
-Two variants (the paper /.10):
- - ``fisher_weights_at_stage`` — diagonal SNR-style (C.10.1); legacy fast summary.
- - ``fisher_weight_blockwise_exact`` — exact per-modality marginal Fisher (C.10.2);
+Two variants:
+ - ``fisher_weights_at_stage`` — diagonal SNR-style; legacy fast summary.
+ - ``fisher_weight_blockwise_exact`` — exact per-modality marginal Fisher (Eq. 31);
  real-data default. Uses Sylvester-Woodbury on the full (R, R) block and then
  reduces per modality via marginal Fisher information of ``Y_m ~ N(θ'_m, Σ_{mm})``.
 """

@@ -1,12 +1,12 @@
-"""Shared modality spatial kernel utility (Step 5 paper-compliance).
+"""Shared modality spatial kernel utility.
 
-Paper the paper Steps 7, 11, 13 specify per-modality spatial covariances Σ^(m)
-that enter the onset-time and velocity-basis priors:
+Per-modality spatial covariances Σ^(m) for the optional spatial priors on
+onset times and velocity-basis coefficients:
 
- η_{c, R_m} ~ N(t̃_{c,m} · 1_{|R_m|}, σ_η^2 · Σ^(m)) (Step 11)
- β_{c, R_m, q} ~ N(0, σ_{β,m,q}^2 · Σ^(m)) (Step 13)
+ η_{c, R_m} ~ N(t̃_{c,m} · 1_{|R_m|}, σ_η^2 · Σ^(m))
+ β_{c, R_m, q} ~ N(0, σ_{β,m,q}^2 · Σ^(m))
 
-Paper the paper specifies the four kernel families:
+Four kernel families:
 
  | Modality | Σ^(m) family |
  |----------|--------------------------------------------------------|
@@ -77,7 +77,7 @@ def rbf_kernel_matrix(R_m: int, length_scale: float = 0.3,
 
  K[i, j] = exp(-0.5 · ((i - j) / (R_m · length_scale))^2) + nugget·δ_ij
 
- Paper the paper: amyloid uses an RBF kernel (diffuse cortical deposition).
+ Amyloid uses an RBF kernel (diffuse cortical deposition).
  """
     if R_m <= 0:
         return np.zeros((0, 0), dtype=np.float32)
@@ -94,7 +94,7 @@ def laplacian_kernel_matrix(R_m: int, length_scale: float = 0.3,
                             nugget: float = 1e-3) -> np.ndarray:
     """Laplacian / Matérn-½ (exponential) kernel — alias for `exp_kernel_matrix`.
 
- Paper the paper: tau uses a connectome-informed graph Laplacian
+ Tau ideally uses a connectome-informed graph Laplacian
  inverse. In elpac we surrogate with the 1-D exponential kernel
  (same intra-modality locality structure without requiring a connectome).
  """
@@ -112,9 +112,9 @@ def car_kernel_matrix(R_m: int, rho: float = 0.5,
  to 1/2 reduces correctly via the row-sum; endpoint rows normalize with
  their single neighbor to row-sum 1, see below).
 
- Paper the paper: structural modality uses a CAR prior with ρ_N ≈ 0.9.
- The default here is ρ=0.5 for numerical headroom; callers (simulator +
- model) pass the paper value via `build_per_modality_kernels(rho_N=...)`.
+ The structural modality uses a CAR prior with ρ_N ≈ 0.9.
+ The default here is ρ=0.5 for numerical headroom;
+ `build_per_modality_kernels` uses ρ_N = 0.9 by default.
 
  Parameters
  ----------
@@ -156,7 +156,7 @@ def car_kernel_matrix(R_m: int, rho: float = 0.5,
 def identity_kernel_matrix(R_m: int, nugget: float = 1e-3) -> np.ndarray:
     """R_m × R_m identity covariance — no spatial structure.
 
- Paper the paper: blood biomarkers have Σ^(B) = I because they are
+ Blood biomarkers have Σ^(B) = I because they are
  scalar features and not spatially registered.
  """
     if R_m <= 0:
@@ -171,25 +171,25 @@ def build_per_modality_kernels(
     R_blood: int,
     length_scale_A: float = 0.3,
     length_scale_T: float = 0.3,
-    rho_N: float = 0.9,   # Paper the paper value (was 0.5 in Step 5b; updated to paper-compliant)
+    rho_N: float = 0.9,
     nugget: float = 1e-3,
     # Backward-compat: if caller passes a single `length_scale=`, use it as a
     # shared default for A and T (and ignore for N/blood which don't use ℓ).
     length_scale: float | None = None,
-    # Step 5c (): pluggable external kernels. When provided, the
+    # Pluggable external kernels. When provided, the
     # four paper-family kernels (RBF / Laplacian / CAR / Identity) are BYPASSED
     # and `external_K` is used instead (after shape validation + nugget ridge).
-    # None preserves the prior behavior.
+    # None preserves the legacy behavior.
     external_K: Optional[List[np.ndarray]] = None,
 ) -> list:
     """Return the list of four Σ^(m) matrices in canonical modality order.
 
  Order: [Σ^(A) (RBF), Σ^(T) (Laplacian), Σ^(N) (CAR), Σ^(B) (Identity)].
 
- Paper the paper:
+ Kernel families:
  - Amyloid (A): RBF (Gaussian squared-exponential).
  - Tau (T): Laplacian / Matérn-½ exponential kernel (surrogate for the
- paper's connectome-informed graph-Laplacian inverse).
+ connectome-informed graph-Laplacian inverse).
  - Structural (N): CAR (conditional autoregressive, nearest-neighbor).
  - Blood (B): Identity (scalar features, no spatial registration).
 
@@ -202,7 +202,7 @@ def build_per_modality_kernels(
  length_scale_T : float
  Laplacian lengthscale for tau (normalized-index units).
  rho_N : float
- CAR coefficient for structural (default 0.5; the paper default 0.9).
+ CAR coefficient for structural (default 0.9).
  nugget : float
  Diagonal ridge shared across all four kernels.
  length_scale : float, optional
@@ -210,13 +210,13 @@ def build_per_modality_kernels(
  `length_scale_A` and `length_scale_T` with this shared value so old
  `build_per_modality_kernels(..., length_scale=0.3)` calls keep working.
  external_K : list of 4 np.ndarray, optional
- Step 5c: pluggable per-modality kernels. When provided, must be a list
+ Pluggable per-modality kernels. When provided, must be a list
  of 4 symmetric PSD matrices with shapes (R_A, R_A), (R_T, R_T),
  (R_N, R_N), (R_blood, R_blood). The paper-family kernels are then
  ignored; only the `nugget` ridge is applied on top of the input K.
  Use case: real-data flexibility where Σ^(m) comes from atlas-based
  region distances or connectome adjacency, not 1-D biomarker-index.
- None (default) preserves the prior behavior.
+ None (default) preserves the legacy behavior.
 
  Returns
  -------

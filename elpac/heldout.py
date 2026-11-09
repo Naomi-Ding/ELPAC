@@ -216,20 +216,19 @@ def compute_marginal_ll_from_posterior(
                 + h01 * theta_shells[c, j_int + 1] + h11 * dj * V[c, j_int + 1]
             )
 
-    # Paper the paper Eq (2)-(3): predictive LL requires marginalization over S:
+    # The predictive LL requires marginalization over S:
     # log p(Y_i | c, X_i) = log ∫ p(Y_i | c, s, Ψ) p(s | c, X_i) ds
     # Approximated via Riemann sum on uniform `stage_grid` (Δs=0.05).
     # (Previously took argmax-over-s — profile likelihood — which inflates M2's
     # LL relative to M1 because M2 has more stage-dependent flexibility to
-    # exploit the argmax-S choice. Identified by audit on
-    #; fixed. See the paper Eq 2-3.)
+    # exploit the argmax-S choice.)
     S_i_per_c = np.zeros((n, C), dtype=np.float32)      # MAP-s per (i, c) (reporting only)
     W_obs = truth.W
     # Accumulate log_q_per_c_s_i[i, c, g] = log p(Y_i | c, s_g, Ψ) + log p(s_g | c, X_i)
     # for GENERAL (held-out unlabelled) subjects. Anchor/NC rows are evaluated
     # at their pinned stage (0.95 / 0.01) directly and stored in anchor_ll[i, c].
     # NC pin 0.01 matches the fit-time stage prior logit_nc_mean = log(0.01/0.99)
-    # used in model.py; see FIX H1 (audit ).
+    # used in model.py.
     log_q_per_c_s_i = np.full((n, C, len(stage_grid)), -np.inf, dtype=np.float64)
     anchor_ll = np.full((n, C), -np.inf, dtype=np.float64)  # LL at pinned-s for anchor/NC
     for i in range(n):
@@ -266,13 +265,13 @@ def compute_marginal_ll_from_posterior(
                 ll = _log_lik_at_stage(c, float(s), resid_obs, A_obs, D_obs, K)
                 if not np.isfinite(ll):
                     continue   # leave -inf for non-PSD / solve-fail cells
-                # (, Phase A): logit-normal density on
+                # Logit-normal density on
                 # stage s has the full log-pdf
                 # log p(s | c, X) = -log σ - 0.5 log 2π - log[s(1-s)]
                 # - 0.5 ((logit s - μ) / σ)^2
-                # Paper the paper Step 2: s ~ LogitNormal(μ_c, σ_c); p(s | c, X_i) is
+                # The paper's stage prior: s ~ LogitNormal(μ_c, σ_c); p(s | c, X_i) is
                 # the target predictive density so the normalizer must be
-                # included. W1: compute logit_s and the Jacobian from
+                # included. Compute logit_s and the Jacobian from
                 # the SAME clipped value so boundary behaviour stays consistent
                 # if the grid is ever extended toward {0, 1}.
                 s_safe = float(np.clip(s, 1e-12, 1.0 - 1e-12))
@@ -317,9 +316,9 @@ def compute_marginal_ll_from_posterior(
     log_joint = log_lik_matrix + log_prior_adj
     log_joint_shifted = log_joint - np.max(log_joint, axis=-1, keepdims=True)
     log_marginal = np.log(np.sum(np.exp(log_joint_shifted), axis=-1)) + np.max(log_joint, axis=-1)
-    # Blocker 5 (, audit): persist per-subject log-marginal LL
-    # so downstream aggregators can compute paired-subject bootstrap CIs per
-    # the paper (Table 1 claims per-subject held-out LLs). The scalar return
+    # Persist per-subject log-marginal LL
+    # so downstream aggregators can compute paired-subject bootstrap CIs.
+    # The scalar return
     # stays for backward compat; the per-subject array is attached as an
     # attribute on the return value.
     heldout_mean = float(np.mean(log_marginal))

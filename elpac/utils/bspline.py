@@ -1,4 +1,4 @@
-"""B-spline and Hermite utilities for the inv_trajectory v2 model.
+"""B-spline and Hermite utilities for the ELPAC model.
 
 Provides:
  - build_bspline_eval_matrix: precompute B_q(tau_j) matrix
@@ -9,7 +9,7 @@ Provides:
 All functions return jnp arrays with consistent dtypes. Splines use
 uniform interior knots on [0, 1] with cubic order (degree 3).
 
-Symbol map (the paper):
+Symbol map (paper notation):
  B_q(tau_j) : velocity basis (Q=6 default)
  psi_p(s) : activation basis (P=5 default)
  K_B : second-difference penalty matrix (P x P)
@@ -209,8 +209,8 @@ def build_ispline_eval_matrix(n_basis: int, n_eval: int, degree: int = 2) -> jnp
  Returns shape (n_eval, n_basis). Each column is a monotone non-decreasing
  I-spline basis function starting at 0 (s=0) and normalized to 1 (s=1). A
  non-negative linear combination of columns is therefore a monotone
- non-decreasing function on [0, 1] with f(0) = 0 — matching the paper
- Step 25's chi_c(s) specification.
+ non-decreasing function on [0, 1] with f(0) = 0, as required for the
+ cognition link chi_c(s).
  """
     s_grid = np.linspace(0.0, 1.0, n_eval)
     design = _build_ispline_design(n_basis, s_grid, degree=degree)
@@ -240,7 +240,7 @@ def cubic_hermite_interpolate(
     """Evaluate the cubic Hermite interpolant within a single shell.
 
  Returns shape (R,). The Hermite basis functions (h00, h10, h01, h11)
- are from the standard formulation used in the paper of the inference plan.
+ are the standard cubic Hermite basis functions.
  """
     u2 = u * u
     u3 = u2 * u

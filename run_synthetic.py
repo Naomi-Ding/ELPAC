@@ -161,59 +161,58 @@ def run_curriculum(truth, m1_seed, m2_seed, use_cog=True, struct_T=True,
                    use_ard_on_A=False,
                    ard_a_shape=1.0,
                    ard_b_rate=1.0,
-                   # per the paper overrides. None -> ModelConfig default.
+                   # Optional overrides. None -> ModelConfig default.
                    eps_pinning=None,
                    d_min=None,
                    omega_0_soft_std=None,
                    delta_shrink_shape_k1=None,
                    theta0_prior_std_override=None,
                    mu_c_prior_std_override=None,
-                   # Stage 0a v2 (Commit C,): explicit sample-var
-                   # priors mode. When True, force ModelConfig to use the
-                   # the paper data-driven diagonals (theta0_prior_std_override
+                   # Explicit sample-var priors mode. When True, force
+                   # ModelConfig to use the data-driven diagonals (theta0_prior_std_override
                    # = mu_c_prior_std_override = None), regardless of the
                    # per-axis CLI overrides above. This is the only CLI path
                    # that can reach the sample-var mode because passing CLI
                    # None is indistinguishable from "CLI not set" (which
                    # falls through to the ModelConfig scalar-0.5 default).
                    force_sample_var_priors=False,
-                   # per the paper flag (σ_c: Half-Cauchy prior +
-                   # drop [0.5, 1.5] clamp). False preserves behavior.
+                   # Optional flag (σ_c: Half-Cauchy prior +
+                   # drop [0.5, 1.5] clamp). True forces it on; False leaves
+                   # the ModelConfig default (True) in place.
                    use_paper_sigma_c=False,
-                   # per the paper flag (K_B second-difference
-                   # smoothness prior on w_{c,k,p}, the paper + the paper).
-                   # False preserves the prior behavior.
+                   # Optional flag (K_B second-difference
+                   # smoothness prior on w_{c,k,p}, paper Eq. 15). True forces
+                   # it on; False leaves the ModelConfig default (True) in place.
                    use_paper_w_ckp_smoothness=False,
                    eps_B=None,
-                   # per the paper flag (soft cascade A<T<N on onset
-                   # centers, the paper + the paper). False preserves 
-                   # the prior behavior.
+                   # Optional flag (soft cascade A<T<N on onset
+                   # centers). True forces it on; False leaves the
+                   # ModelConfig default (True) in place.
                    use_paper_cascade_prior=False,
-                   # per the paper flag (per-modality MVN spatial
-                   # priors on onset_times + beta_velocity, the paper Steps 7, 11, 13
-                   # + the paper). False preserves the prior behavior.
+                   # Optional flag (per-modality MVN spatial
+                   # priors on onset_times + beta_velocity). True forces it on;
+                   # False leaves the ModelConfig default (True) in place.
                    use_paper_spatial_priors=False,
                    spatial_length_scale=0.3,
-                   # Step 5c (): external kernel NPZ path. When set,
+                   # Optional external kernel NPZ path. When set,
                    # the ModelConfig will load Σ^(m) from this file instead of
                    # building RBF/Laplacian/CAR/Identity kernels. Coupled with
                    # the simulator's `external_kernels` kwarg upstream.
                    external_kernels_path=None,
-                   # per the paper (monotone I-spline chi_c per
-                   # the paper). "polynomial" default preserves
-                   # the prior behavior. "ispline" MUST be paired
+                   # Cognition link basis (monotone I-spline chi_c).
+                   # "polynomial" leaves the ModelConfig default ("ispline")
+                   # in place; other values are passed through. "ispline" MUST be paired
                    # with simulator cognition_model="ispline".
                    chi_c_basis="polynomial",
                    chi_c_ispline_n_basis=3,
-                   # fix: HalfNormal-direct diagonal on A_c
-                   #. False preserves an earlier-version softplus
-                   # parameterization (which pins A_kk at ≈0.693).
+                   # HalfNormal-direct diagonal on A_c. False uses the legacy
+                   # softplus parameterization (which pins A_kk at ≈0.693).
                    use_paper_halfnormal_diag=True,
-                   # / : freeze Phase-1 posterior mean during
+                   # Freeze Phase-1 posterior mean during
                    # Phase-2. "phase1_in_memory" uses the just-computed m1
                    # posterior; a file path loads from NPZ/pkl. None = off.
                    frozen_mean_source=None,
-                   # -style random-init test: skip Phase 1 + Phase 1.5
+                   # Random-init test: skip Phase 1 + Phase 1.5
                    # warm-start entirely; run Phase 2 directly with
                    # init_to_uniform(radius=2.0) per the SVI seed. Tests
                    # whether VI lands in the same basin from random inits
@@ -233,8 +232,8 @@ def run_curriculum(truth, m1_seed, m2_seed, use_cog=True, struct_T=True,
     n_train = train_truth.Y.shape[0]
     sh = shape if shape is not None else SHAPE
 
-    # Build the the paper override kwargs (only pass fields that are explicitly
-    # set; otherwise ModelConfig's paper-the paper defaults apply).
+    # Build the ModelConfig override kwargs (only pass fields that are explicitly
+    # set; otherwise ModelConfig's defaults apply).
     step1_kwargs = {}
     if eps_pinning is not None:
         step1_kwargs["eps_pinning"] = float(eps_pinning)
@@ -245,7 +244,7 @@ def run_curriculum(truth, m1_seed, m2_seed, use_cog=True, struct_T=True,
     if delta_shrink_shape_k1 is not None:
         step1_kwargs["delta_shrink_shape_k1"] = float(delta_shrink_shape_k1)
     # force_sample_var_priors wins over per-axis floats: passing it True
-    # always lands theta0/mu_c on the paper sample-variance mode (None).
+    # always lands theta0/mu_c on the sample-variance mode (None).
     if force_sample_var_priors:
         step1_kwargs["theta0_prior_std_override"] = None
         step1_kwargs["mu_c_prior_std_override"] = None
@@ -254,38 +253,30 @@ def run_curriculum(truth, m1_seed, m2_seed, use_cog=True, struct_T=True,
             step1_kwargs["theta0_prior_std_override"] = float(theta0_prior_std_override)
         if mu_c_prior_std_override is not None:
             step1_kwargs["mu_c_prior_std_override"] = float(mu_c_prior_std_override)
-    # per the paper flag. Only attach when True so the default
-    # False branch preserves ModelConfig construction 
-    # (the kwarg itself is unchanged on absent keys, but being explicit about
-    # "only set when non-default" matches the pattern used by step1_kwargs).
+    # The use_paper_* flags below are only attached when True; otherwise the
+    # ModelConfig default (True) applies.
     if use_paper_sigma_c:
         step1_kwargs["use_paper_sigma_c"] = True
-    # per the paper flag. Only attach when True to keep the default
-    # False branch identical to ModelConfig construction.
     if use_paper_w_ckp_smoothness:
         step1_kwargs["use_paper_w_ckp_smoothness"] = True
     if eps_B is not None:
         step1_kwargs["eps_B"] = float(eps_B)
-    # per the paper flag. Only attach when True so the default False
-    # branch preserves ModelConfig construction.
     if use_paper_cascade_prior:
         step1_kwargs["use_paper_cascade_prior"] = True
-    # per the paper flag. Only attach when True so the default False
-    # branch preserves ModelConfig construction.
     if use_paper_spatial_priors:
         step1_kwargs["use_paper_spatial_priors"] = True
         step1_kwargs["spatial_length_scale"] = float(spatial_length_scale)
-    # Step 5c: thread the NPZ path into ModelConfig so build_numpyro_model
+    # Thread the external-kernel NPZ path into ModelConfig so build_numpyro_model
     # loads the external kernels at construction time. Attached only when
-    # non-None so the default the prior path stays identical.
+    # non-None so the default path stays identical.
     if external_kernels_path is not None:
         step1_kwargs["external_kernels_path"] = str(external_kernels_path)
-    # per the paper. Only attach when non-default so 
-    # preserved when chi_c_basis stays "polynomial".
+    # Only attach when not "polynomial"; otherwise ModelConfig's default
+    # ("ispline") applies.
     if chi_c_basis != "polynomial":
         step1_kwargs["chi_c_basis"] = str(chi_c_basis)
         step1_kwargs["chi_c_ispline_n_basis"] = int(chi_c_ispline_n_basis)
-    # the paper HalfNormal-direct diagonal fix. Pass-through unconditional
+    # HalfNormal-direct diagonal. Pass-through unconditional
     # after the default flip: if caller requests False, we MUST
     # force False into ModelConfig (class default is now True, so a missing
     # kwarg would silently fall through to HN).
@@ -334,16 +325,16 @@ def run_curriculum(truth, m1_seed, m2_seed, use_cog=True, struct_T=True,
               "sharpness", "beta_vel", "Theta_J", "log_D",
               "a_flat", "a_diag_raw", "a_diag_pos", "delta_shrink", "tau_k",
               "alpha_ard",
-              # the paper cascade-prior sites (present only when flag is on;
+              # the cascade-prior sites (present only when flag is on;
               # posterior_to_init_values silently skips missing keys).
               "t_ATN_raw", "t_tilde_B", "onset_eta")
     if skip_phase1_warmstart:
-        # -style: no warm-start; let run_phase fall through to
+        # No warm-start; let run_phase fall through to
         # init_to_uniform per the m2_seed.
         iv = {}
     else:
         iv = posterior_to_init_values(m1_post, keep_sites=shared)
-        # Blocker 2 (): under Step 3 paper-smoothness, the Phase-2 sample
+        # Under the K_B smoothness prior, the Phase-2 sample
         # site is `w_ckp_raw_std` (not `w_ckp_raw`). Init the correct site so the
         # M2 warm-start actually starts at ν ≈ 1 — prior code only zeroed the
         # legacy site and silently left `w_ckp_raw_std` at its noisy guide init.
@@ -351,7 +342,7 @@ def run_curriculum(truth, m1_seed, m2_seed, use_cog=True, struct_T=True,
             iv["w_ckp_raw_std"] = jnp.zeros((sh.C, sh.K, sh.P))
         else:
             iv["w_ckp_raw"] = jnp.zeros((sh.C, sh.K, sh.P))
-        # the paper: when the cascade prior is on, `onset_times` is a DETERMINISTIC
+        # When the cascade prior is on, `onset_times` is a DETERMINISTIC
         # pass-through of (t_ATN_raw, t_tilde_B, onset_eta). Drop it from iv so
         # init_to_value doesn't try to push a value into a non-sample site.
         if use_paper_cascade_prior:
@@ -376,16 +367,15 @@ def run_curriculum(truth, m1_seed, m2_seed, use_cog=True, struct_T=True,
                        ard_a_shape=ard_a_shape,
                        ard_b_rate=ard_b_rate,
                        **step1_kwargs)
-    # the paper: pass `sh` so psi_basis_cache aligns with the inference-side
+    # Pass `sh` so psi_basis_cache aligns with the inference-side
     # P/J rather than truth.shape.P/J. Without this, --model-p crashes with
     # a w_ckp/psi_S shape mismatch and --model-j silently clips out-of-bounds
     # psi indices when cfg.J > truth.shape.J.
     inputs = _build_model_inputs(train_truth, model_shape=sh)
     tc = TrainConfig(phase1_steps=0, phase2_steps=m2_steps, seed=m2_seed,
                      guide_type=guide_type, log_every=100000)
-    # : resolve in-memory frozen-mean source strings to the actual m1
-    # posterior dict. Two distinct sources are supported (the paper has both
-    # readings; see ABLATION_FULL_CONFIGS[5] / [6]):
+    # Resolve in-memory frozen-mean source strings to the actual m1
+    # posterior dict. Two distinct sources are supported:
     # "m1_phase1" -> M1's Phase-1 mean-only posterior
     # "m1_phase2" -> M1's fully-converged (Phase-2) posterior
     # "phase1_in_memory"-> legacy alias preserved for back-compat → m1_phase2
